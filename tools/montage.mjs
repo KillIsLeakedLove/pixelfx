@@ -26,6 +26,9 @@ if (!outFile) {
 }
 const cols = +(flags.cols ?? 6), rows = +(flags.rows ?? 3), [CW, CH] = (flags.cell ?? "96x80").split("x").map(Number);
 const fps = +(flags.fps ?? 30), seconds = +(flags.seconds ?? 5), gap = +(flags.gap ?? 2), stagger = +(flags.stagger ?? 0.35), rest = +(flags.rest ?? 0.35);
+const scale = +(flags.scale ?? Math.max(1, Math.floor(1280 / (cols * CW + (cols + 1) * gap))));
+if (!Number.isInteger(scale) || scale < 1) throw new RangeError("render scale must be a positive integer");
+const cellW = CW * scale, cellH = CH * scale, gapPx = gap * scale;
 let ids;
 if (flags.ids) ids = flags.ids.split(",");
 else if (flags.category) ids = allIds().filter((id) => id.startsWith(flags.category + "/"));
@@ -38,27 +41,28 @@ else {
 }
 ids = ids.slice(0, cols * rows);
 
-const W = cols * CW + (cols + 1) * gap, H = rows * CH + (rows + 1) * gap;
+const W = cols * cellW + (cols + 1) * gapPx, H = rows * cellH + (rows + 1) * gapPx;
 const cells = [], cellPlace = {};
 for (const [i, id] of ids.entries()) {
-  const fx = await loadEffect(id), m = fx.meta, frame = createFrame(CW, CH);
+  const fx = await loadEffect(id), m = fx.meta, frame = createFrame(cellW, cellH, 0, 0, scale);
   // a canvas that fits is centred; a bigger one is cropped round its anchor, keeping a strip of floor in view
   const [w, h] = m.size, [ox, oy] = m.origin;
   const x = w <= CW ? Math.floor((CW - w) / 2) + ox : Math.round(CW / 2 + ox - w / 2);
   const y = h <= CH ? Math.floor((CH - h) / 2) + oy : CH - Math.min(h - oy, Math.round(CH * 0.16));
-  const bg = backdrop(flags.bg ?? m.bg, CW, CH, y);
+  const bg = backdrop(flags.bg ?? m.bg, cellW, cellH, y * scale, scale);
   if (fx.mod.act) {
     // an act stands on the floor near the bottom of its cell, with the whole performance in view if it fits
     const b = actBounds(fx.mod), bw = b.x1 - b.x0;
     Object.assign(cellPlace, { x: bw <= CW ? Math.floor((CW - bw) / 2) - b.x0 : Math.round(CW / 2 + (-b.x0 - bw / 2)), y: CH - 16 });
   }
   const acted = !!fx.mod.act, X = acted ? cellPlace.x : x, Y = acted ? cellPlace.y : y;
-  cells.push({ id, fx, m, acted, frame, x: X, y: Y, bg: acted ? backdrop(flags.bg ?? m.bg, CW, CH, Y) : bg, cx: gap + (i % cols) * (CW + gap), cy: gap + Math.floor(i / cols) * (CH + gap), delay: m.loop ? 0 : rand(i, 7) * stagger, inst: null, born: 0 });
+  cells.push({ id, fx, m, acted, frame, x: X, y: Y, bg: acted ? backdrop(flags.bg ?? m.bg, cellW, cellH, Y * scale, scale) : bg, cx: gapPx + (i % cols) * (cellW + gapPx), cy: gapPx + Math.floor(i / cols) * (cellH + gapPx), delay: m.loop ? 0 : rand(i, 7) * stagger, inst: null, born: 0 });
 }
-const n = Math.round(seconds * fps), frames = [], buf = new Uint8ClampedArray(CW * CH * 4);
+const n = Math.round(seconds * fps), frames = [], buf = new Uint8ClampedArray(cellW * cellH * 4);
 for (let f = 0; f < n; f++) {
   const t = f / fps, out = new Uint8ClampedArray(W * H * 4);
-  for (let i = 0; i < W * H; i++) out.set([0, 0, 0, 255], i * 4);
+  out.fill(0);
+  for (let i = 3; i < out.length; i += 4) out[i] = 255;
   for (const c of cells) {
     const local = t - c.delay;
     if (c.acted) {
@@ -74,10 +78,10 @@ for (let f = 0; f < n; f++) {
       }
       composite(c.frame, buf, c.bg);
       const [sx, sy] = local >= 0 ? c.act.shake : [0, 0];
-      for (let yy = 0; yy < CH; yy++) {
-        const from = Math.max(0, Math.min(CH - 1, yy - sy));
-        for (let xx = 0; xx < CW; xx++) {
-          const a = (from * CW + Math.max(0, Math.min(CW - 1, xx - sx))) * 4, d = ((c.cy + yy) * W + c.cx + xx) * 4;
+      for (let yy = 0; yy < cellH; yy++) {
+        const from = Math.max(0, Math.min(cellH - 1, yy - sy * scale));
+        for (let xx = 0; xx < cellW; xx++) {
+          const a = (from * cellW + Math.max(0, Math.min(cellW - 1, xx - sx * scale))) * 4, d = ((c.cy + yy) * W + c.cx + xx) * 4;
           out[d] = buf[a]; out[d + 1] = buf[a + 1]; out[d + 2] = buf[a + 2];
         }
       }
@@ -96,12 +100,11 @@ for (let f = 0; f < n; f++) {
       c.inst.draw(c.frame, "front");
     }
     composite(c.frame, buf, c.bg);
-    for (let yy = 0; yy < CH; yy++) out.set(buf.subarray(yy * CW * 4, (yy + 1) * CW * 4), ((c.cy + yy) * W + c.cx) * 4);
+    for (let yy = 0; yy < cellH; yy++) out.set(buf.subarray(yy * cellW * 4, (yy + 1) * cellW * 4), ((c.cy + yy) * W + c.cx) * 4);
   }
   frames.push({ color: out });
 }
-const scale = +(flags.scale ?? Math.max(1, Math.floor(1280 / W)));
 if (outFile.endsWith(".png")) {
   save(outFile, encodePNG(W, H, frames[Math.floor(n * 0.45)].color));
-} else writeVideo(outFile, { w: W, h: H, fps, frames }, scale);
-console.log(`${cells.length} effects, ${W}x${H} art px x${scale}, ${seconds}s -> ${outFile}`);
+} else writeVideo(outFile, { w: W, h: H, fps, frames }, 1);
+console.log(`${cells.length} effects, ${cols * CW}x${rows * CH} logical px at ${scale}x, ${seconds}s -> ${outFile}`);

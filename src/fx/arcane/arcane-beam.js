@@ -1,8 +1,8 @@
 // The beam (banded across, pulses running down it, sine strands that brighten in front, a source flare with
 // spinning rays, an end flare spraying rays and sparks) is adapted from Sprite Fusion's open-source energy beam
 // (https://www.spritefusion.com/pixel-art-vfx/energy), MIT License, Copyright (c) 2026 Hugo Duprez.
-import { PAL, fit, cycle, fly, flyV, loopNoise, fract, ease, sparkle, TAU, WHITE, READY } from "../../core/index.js";
-import { bayer, mote } from "./_lib.js";
+import { PAL, fit, cycle, fly, flyV, loopNoise, fract, ease, sparkle, clamp, TAU, WHITE, READY } from "../../core/index.js";
+import { mote } from "./_lib.js";
 
 const D = 1.2, HX = 15, HY = -24, L = 168, W = 6;
 
@@ -40,7 +40,7 @@ export const act = {
 
 export function draw(p, t, o) {
   const C = fit(o.palette, 8), ph = t / D, S = o.seed, EX = HX + L;
-  // the body, built across from a white core out to a dithered violet edge, wobbling and pulsing as it goes
+  // the body, built across from a white core out to a softly tapered violet edge, wobbling and pulsing as it goes
   const LV = [WHITE, C[6], C[5], C[4], C[3], C[2]];
   for (let d = 0; d <= L; d += 0.5) {
     const x = HX + d, w = W * (1 + 0.12 * Math.sin(d * 0.35 - ph * TAU * 8)) * Math.min(1, (d + 3) / 7);
@@ -49,8 +49,7 @@ export function draw(p, t, o) {
       const q = Math.abs(q0) / w, y = HY + q0;
       let lv = q < 0.2 ? 0 : q < 0.4 ? 1 : q < 0.62 ? 2 : q < 0.85 ? 3 : q < 1 ? 4 : 5;
       lv = Math.max(0, lv - pulse);
-      if (lv === 5 && bayer(x, y) > (1.3 - q) / 0.3) continue;
-      p.px(x, y, LV[lv]);
+      p.dot(x, y, LV[lv], lv === 5 ? clamp((1.3 - q) / 0.3) : 1);
     }
     // three strands twisting round it: bright on the near side, gone behind
     for (let s = 0; s < 3; s++) {

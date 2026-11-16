@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="docs/readme/montage.gif" width="800" alt="A grid of pixel art effects playing at once: a campfire, a burning skull, a waterfall, a plasma ball, a portal, a tornado and more.">
+  <img src="docs/readme/montage.gif" width="800" alt="A grid of smooth high-definition effects playing at once: a campfire, explosion, waterfall, storm cloud, portal and tornado.">
 </p>
 
 # pixelfx.
 
-**<!-- count -->244<!-- /count --> pixel art effects and animations, every one a small piece of code.** Fire,
+**<!-- count -->244<!-- /count --> smooth HD 2D effects and animations, every one a small piece of code.** Fire,
 explosions, magic, weather, UI, pickups, critters and more. Play them live, recolor and mirror them, drop them into
-a browser game, or export sprite sheets for any engine. Plus a Claude Code skill that makes new ones the way a
-picky pixel artist would: draft, render, look, refine.
+a browser game, or export 4x sprite sheets for any engine. Plus an agent skill that makes new ones through a
+draft, render, look, refine loop.
 
 Every effect that involves a character is **acted out**: he winds up, lets go, freezes on contact and recovers, and a
 target takes the hit. Twelve whole moves chain the effects into attacks from wind-up to recovery.
@@ -63,8 +63,9 @@ Every effect is a file in `src/fx/<category>/<name>.js`. The [catalog](docs/CATA
 import { createFrame, clearFrame, createFx, composite } from "pixelfx";
 import * as frostNova from "pixelfx/fx/ice/frost-nova";
 
-const frame = createFrame(320, 180);                   // your game's pixel resolution
-const img = new ImageData(320, 180);
+const scale = 4;                                        // higher output resolution; coordinates stay logical
+const frame = createFrame(320 * scale, 180 * scale, 0, 0, scale);
+const img = new ImageData(frame.w, frame.h);
 const fx = createFx(frostNova, { x: 160, y: 140 });   // also: flip, angle, seed, palette, light...
 
 function tick(dt) {
@@ -74,7 +75,7 @@ function tick(dt) {
   drawCharacters();
   fx.draw(frame, "front");
   composite(frame, img.data, backgroundColor);         // color, then light added on top
-  ctx.putImageData(img, 0, 0);                         // scale up with image-rendering: pixelated
+  ctx.putImageData(img, 0, 0);                         // display with normal, smooth browser filtering
 }
 ```
 
@@ -87,7 +88,8 @@ node tools/render.mjs ice/frost-nova --sheet
 ```
 
 That writes a transparent PNG of every frame in a grid and an Aseprite-style JSON (frame rects, durations, and
-`meta.pixelfx` with fps, loop, columns and the pivot). Phaser's atlas loader and the Aseprite importers for Godot
+`meta.pixelfx` with fps, loop, columns, output scale and the pivot). Sheets default to 4x; use `--scale 1` for
+logical-size output. Phaser's atlas loader and the Aseprite importers for Godot
 and Unity read it. `node tools/sheets.mjs` exports the whole library to `sheets/`.
 
 Any effect takes a `palette` (a dark-to-bright ramp of hex colors), so a fire can burn blue and a heal can glow
@@ -153,14 +155,16 @@ The body is yours to use too: `skeleton(pose)` gives you every joint of a pose i
 
 ## the skill.
 
-The `pixelfx` skill teaches Claude Code to find, use, export and make effects. Install it as a plugin:
+The `pixelfx` skill teaches agents to find, use, export and make effects. Install the Claude Code plugin:
 
 ```
 /plugin marketplace add patch-gg/pixelfx
 /plugin install pixelfx@pixelfx
 ```
 
-or copy `skills/pixelfx` into `~/.claude/skills/`. Then ask for what you want:
+or copy `skills/pixelfx` into `~/.claude/skills/`. For Codex, copy `skills/pixelfx-hd` to
+`%USERPROFILE%\.agents\skills\pixelfx-hd` on Windows or `~/.agents/skills/pixelfx-hd` on macOS/Linux.
+Then ask for what you want:
 
 - "Add a frost nova to my mage's ultimate."
 - "Make five takes on a coin pickup sparkle and show me the best two."
@@ -202,12 +206,12 @@ test it before it goes live. The [quickstart](https://docs.patch.gg/quickstart) 
 - **Two kinds of effect, no images.** Pure effects export `draw(p, t, o)`, the frame at `t` seconds from `t` alone, so
   loops tile with no seam. Simulated effects export `create(o)` and step real particles, debris and lights at 120 Hz,
   so sparks bounce and smoke rolls the same at any frame rate.
-- **Two buffers.** `color` takes pixels: opaque, dithered or truly translucent. `light` takes additive glow, added on
-  top. Hot things look hot because of the light buffer.
+- **Two buffers.** `color` stores continuous RGBA coverage; `light` stores additive glow, composited on top. Hot
+  things look hot because of the light buffer.
 - **Seeded everything.** Every random number comes from the effect's seed, so frame 40 is the same every time.
 - **Local space.** Effects draw around their own origin; the painter places, mirrors and rotates them. Directional
   effects face right. A 24×38 stock character stands in for status effects, auras and hits.
-- **A real skeleton, drawn down to pixels.** The grey dummy is neutral on purpose, so the eye goes to the move and any effect's
+- **A real skeleton, rasterized at the output scale.** The grey dummy is neutral on purpose, so the eye goes to the move and any effect's
   colors read on it. He's a 3D skeleton with fixed-length bones, pelvis to spine to shoulders, rendered in a few flat tones with one clean
   ink line, the way Dead Cells makes its sprites. So he can twist, bend and really turn round, and depth decides what's in front. Poses hold on 12 fps
   steps, the way hand-drawn sprites do, while particles run at full rate.
@@ -217,7 +221,7 @@ test it before it goes live. The [quickstart](https://docs.patch.gg/quickstart) 
 ## license.
 
 MIT, code and effects. Use them in anything, commercial included. Parts are adapted from Hugo Duprez's MIT effects
-and from Hollow Crown's MIT source, and the Patch Pixel font in `gallery/fonts` is Patch's own and not covered: see
+and from Hollow Crown's MIT source, and the unused Patch Pixel font in `gallery/fonts` is Patch's own and not covered: see
 [NOTICE.md](NOTICE.md).
 
 Made by [Patch](https://patch.gg).

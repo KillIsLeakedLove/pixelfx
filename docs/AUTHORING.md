@@ -1,8 +1,8 @@
 # Writing an effect
 
-An effect is one file, `src/fx/<category>/<name>.js` (kebab-case), drawing pixel art over time into two buffers.
-It has no images and no dependencies beyond `src/core`. It can be played live, recolored, mirrored and rendered
-to a sprite sheet for any engine.
+An effect is one file, `src/fx/<category>/<name>.js` (kebab-case), drawing smooth high-definition 2D art over time
+into two buffers. It has no images and no dependencies beyond `src/core`. It can be played live, recolored, mirrored
+and rendered to a high-resolution sprite sheet for any engine.
 
 The quality bar is Sprite Fusion's open-source pixel art VFX by Hugo Duprez
 ([spritefusion.com/pixel-art-vfx](https://www.spritefusion.com/pixel-art-vfx), MIT). Every effect here should hold up
@@ -45,8 +45,10 @@ that loop come from `cycle`, motion from `fly`, noise from `loopNoise`/`tileFbm`
 
 ## The contract
 
-- **Scale.** The stock character is 24 x 38 px (`actor: 2`): every effect is drawn at that scale, detail at the
-  1 px level. Canvases are as big as the effect needs, often 96 to 320 px wide; transitions are 320 x 180.
+- **Logical scale.** The stock character is 24 x 38 units (`actor: 2`): effects use stable logical coordinates,
+  independent of output resolution. Canvases are as big as the effect needs, often 96 to 320 units wide; transitions
+  are 320 x 180. Render with `createFrame(w * scale, h * scale, 0, 0, scale)` for denser, smooth output; tools export
+  sprite sheets at 4x by default (`--scale 1` keeps the original logical size).
 - **Local coordinates.** (0, 0) is the anchor: the feet of the character, the point of impact, the base of a
   torch, the muzzle. x right, y down, 1 unit = 1 px. The painter places, mirrors (`flip`) and rotates (`angle`).
   Directional effects face right. Ground effects stand on y = 0, the floor; floor rings, cracks, scorch and
@@ -129,7 +131,7 @@ order, unknown pose fields, loop seams and hands that teleport.
 - `new Particles({ rng, ground: (x) => floorY, sparks: [head..tail colors], haze: color, onLand })`,
   `ps.spawn(kind, x, y, vx, vy, life, color, size, delay, flags)`, `ps.update(dt)`, `ps.draw(p, "back"|"front")`.
   Kinds `P.*`: `SPARK` (speed-stretched two-tone streak, gravity, bounces on the floor, glows), `MOTE` (streak
-  with a dark tail, dithers out), `STREAK` (accelerating dotted line: gathering energy), `FLAKE` (drifting
+  with a dark tail, soft-fades), `STREAK` (accelerating line: gathering energy), `FLAKE` (drifting
   speck, a cross when big), `VAPOUR` (soft translucent puff that swells and thins, optional haze glow), `DUST`
   (denser puff), `SMOKE` (three soft discs, lit cap, rises and sways; color 0 uses `SMOKE_RAMP`), `FIRE`
   (a ball of flame cooling down `FIRE_RAMP` as it rises; flag `PF.SMOKES` turns it to smoke when it dies,
@@ -148,21 +150,21 @@ order, unknown pose fields, loop seams and hands that teleport.
 
 ## Painter API
 
-Coordinates local, floats fine. `c` a color number; `a` alpha 0..1 (dithered unless said).
+Coordinates local, floats fine. `c` a color number; `a` alpha 0..1 and is composited continuously, with no ordered dithering.
 
 | call | draws |
 |---|---|
-| `p.px(x, y, c)` / `p.dot(x, y, c, a)` | one pixel, solid / dithered |
-| `p.blend(x, y, c, a)` | one pixel, truly translucent |
+| `p.px(x, y, c)` / `p.dot(x, y, c, a)` | one soft-edged mark, opaque / translucent |
+| `p.blend(x, y, c, a)` | a translucent soft-edged mark |
 | `p.disc(x, y, r, c, a)` | translucent disc (smoke, vapour, mist); c, a may be `(d, angle) =>` |
-| `p.line(x0, y0, x1, y1, c, a)` | 1 px line; c, a may be `(u) =>` |
+| `p.line(x0, y0, x1, y1, c, a)` | smooth 1-unit line; c, a may be `(u) =>` |
 | `p.polyline(pts, c, a)`, `p.beam(x0, y0, x1, y1, w, c, a)` | lines through points; thick capsule |
 | `p.circle`, `p.ellipse`, `p.ring`, `p.rect`, `p.poly`, `p.tri` | filled shapes; c, a may be functions of the shape's coordinates |
 | `p.arc(x, y, r, w, a0, a1, c, a)` | band of a ring, `w` may taper `(u) =>` |
-| `p.shade(x0, y0, x1, y1, fn)` | per-pixel shader: `fn(x, y, out)` returns a color or sets `out.c out.a out.l out.k`; x, y are pixel centers |
+| `p.shade(x0, y0, x1, y1, fn)` | per-sample shader: `fn(x, y, out)` returns a color or sets `out.c out.a out.l out.k`; `x, y` are logical sample centers |
 | `p.glow(x, y, r, c, k)`, `p.glowLine`, `p.glowRing`, `p.light(x, y, c, k)` | additive light |
-| `p.sprite(rows, pal, x, y, {scale, a, flip, flipY, tint})` | sprite from strings |
-| `p.text(str, x, y, c, {font, scale, align, outline, shadow, a})`, `p.measure` | pixel text (`mini` 3x5, `big` 5x7; use `scale: 2` at this size) |
+| `p.sprite(rows, pal, x, y, {scale, a, flip, flipY, tint})` | color-coded sprite rows with smooth sampling |
+| `p.text(str, x, y, c, {font, scale, align, outline, shadow, a})`, `p.measure` | compact bitmap labels (`mini` 3x5, `big` 5x7; use `scale: 2` at this size) |
 | `p.mask(m, x, y, c, a)`, `p.outline(m, x, y, c, a)`, `p.get(x, y)` | silhouettes; read back a pixel |
 
 Helpers from `src/core/index.js`: `createAct actTiming READY chain shiftKeys shiftHits skeleton posedParts`, `clamp lerp seg smooth bump ease.* TAU`, `Rng rng rand`, `noise noise2 fbm
@@ -180,7 +182,7 @@ What makes Sprite Fusion's effects good, and what every effect here must do:
    glint, `Lights` that flare at the moment of impact and fall away, light along arcs and beams, a warm or cold
    pool on the floor while something burns or freezes.
 3. **Translucent volumes.** Smoke, vapour, dust and mist are soft (`SMOKE`, `VAPOUR`, `DUST`, `p.disc`), lit on
-   top, swelling and thinning. Never a dithered checkerboard for smoke.
+   top, swelling and thinning. Keep alpha continuous; never use stippled texture to fake transparency.
 4. **Real motion.** Sparks stretch with speed, fall and bounce. Debris tumbles, bounces, settles and fades.
    Fire rises and cools into smoke. Things that land kick up dust. Use drag: fast burst, slow drift.
 5. **Choreography in phases.** Anticipation or charge (things gathering in), release (a 1 to 2 frame white
@@ -190,10 +192,10 @@ What makes Sprite Fusion's effects good, and what every effect here must do:
    front. Back rows of crystals or flames are dimmer.
 7. **Timing.** Fast attack, slow release. Big effects linger 2 to 4 s while smoke clears and sparkles fade;
    hits are snappy (0.3 to 0.8 s) but still have follow-through.
-8. **Reads at 1x** with a clear focal point, no speckle noise inside shapes.
+8. **Reads cleanly at every output size** with a clear focal point and no decorative speckle or grain inside shapes.
 9. **Original.** Generic motifs fine; never a specific game's sprite, character or logo. Don't copy one of
    Hugo's effects wholesale: use his techniques, make the design your own.
-10. **Clean.** Fits its canvas, ends empty or loops clean, deterministic, under 2 ms a frame (`tools/check.mjs`).
+10. **Clean.** Smooth contours, fits its canvas, ends empty or loops clean, deterministic, under 2 ms a frame (`tools/check.mjs`).
 
 ## The method
 

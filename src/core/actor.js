@@ -107,7 +107,7 @@ export function stockActor(k = 1) {
   return { mask: m, pixels: PIXELS[k], x, y, w: m.w, h: m.h, k, head: [0, y], chest: [0, k === 2 ? -26 : y + 11], ...(k === 2 ? { eyes: [[13, 3], [15, 3]] } : {}) };
 }
 
-/** Draw the stock actor with its feet at the painter's origin, at alpha a (dithered). */
+/** Draw the stock actor with its feet at the painter's origin, at continuous alpha a. */
 export function drawActor(p, actor = stockActor(), a = 1) {
   if (a > 0) p.sprite(SPRITES[actor.k === 2 ? 2 : 1], actor.k === 2 ? DUMMY_PAL : HERO_PAL, actor.x, actor.y, { a });
 }

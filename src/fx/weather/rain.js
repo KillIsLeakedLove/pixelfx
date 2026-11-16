@@ -2,7 +2,7 @@
 // throw droplets, mist low on the ground) is adapted from Sprite Fusion's open-source rain
 // (https://www.spritefusion.com/pixel-art-vfx/rain), MIT License, Copyright (c) 2026 Hugo Duprez.
 import { fit, clamp, smooth, rand, wrap, mix, WHITE } from "../../core/index.js";
-import { clip, pass, field, sample, trips, crown, bayer } from "./_lib.js";
+import { clip, pass, field, sample, trips, crown } from "./_lib.js";
 
 export const meta = {
   name: "Rain",
@@ -148,10 +148,9 @@ function mist(p, t, S, C) {
   pass(p, meta, -20, 9, (x, y, out) => {
     const d = dens(x, y);
     if (d < 0.28) return;
-    const th = bayer(x, y) * 0.06;
     out.b = 1;
-    if (d > 0.46 + th && dens(x, y - 1) < 0.43) (out.c = crest), (out.a = 0.5);
-    else (out.c = d > 0.58 + th ? C[4] : C[3]), (out.a = clamp((d - 0.28) * 1.6) * 0.5);
+    if (d > 0.46 && dens(x, y - 1) < 0.43) (out.c = crest), (out.a = 0.5);
+    else (out.c = d > 0.58 ? C[4] : C[3]), (out.a = clamp((d - 0.28) * 1.6) * 0.5);
     out.l = C[4];
     out.k = (d - 0.3) * 0.1;
   });

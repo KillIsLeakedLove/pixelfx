@@ -38,10 +38,10 @@ export function create(o) {
   const ps = new Particles({ rng: R, ground: floor, sparks: [C[7], C[6], C[5], C[4]] });
   const bits = new Bits({ ground: floor }), lights = new Lights();
   const front = (mx) => level(t) + 0.06 * tileFbm(mx * 0.4, 0.5, 0, 0, o.seed, 2);
-  // each pixel's stone: its own shading walked down a grey ramp, grained, lit on the top left
+  // each stone cell keeps the body's broad value structure, shaded by a clean directional ramp
   const stone = S.body.map(([x, y]) => {
-    const tone = clamp((luma(colorAt(a, x, y)) - 0.06) / 0.78), mottle = tileFbm(x * 0.32, y * 0.32, 0, 0, o.seed + 5, 2);
-    let i = 1 + Math.round(tone * 4.6 + mottle * 1.1);
+    const tone = clamp((luma(colorAt(a, x, y)) - 0.06) / 0.78);
+    let i = 1 + Math.round(tone * 4.6);
     if (!S.on(x - 1, y) || !S.on(x, y - 1)) i += 1;
     else if (!S.on(x + 1, y) || !S.on(x, y + 1)) i -= 1;
     return { x, y, up: 1 - (y + 0.5) / H, c: C[clamp(i, 1, 6)] };

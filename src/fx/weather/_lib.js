@@ -7,8 +7,6 @@
 
 import { rand, wrap, TAU } from "../../core/index.js";
 
-const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
-
 /** The canvas in local coordinates: x0 <= x < x1, y0 <= y < y1. */
 export function box(meta) {
   const [W, H] = meta.size, [OX, OY] = meta.origin;
@@ -41,81 +39,62 @@ export function clip(p, meta) {
 // the painter's glow, with its box cut to the canvas first (big soft lights stay cheap)
 function glow(q, B, x, y, r, c, k) {
   if (r < 1 || k <= 0.004) return;
-  const x0 = Math.max(B.x0, Math.floor(x - r)), x1 = Math.min(B.x1 - 1, Math.ceil(x + r));
-  const y0 = Math.max(B.y0, Math.floor(y - r)), y1 = Math.min(B.y1 - 1, Math.ceil(y + r));
-  for (let py = y0; py <= y1; py++) {
-    const dy = (py + 0.5 - y) / r;
-    for (let px = x0; px <= x1; px++) {
-      const dx = (px + 0.5 - x) / r, d = dx * dx + dy * dy;
+  const cx = q.toX(x, y), cy = q.toY(x, y);
+  r *= q.scale;
+  const x0 = Math.max(q.ox, Math.floor(cx - r)), x1 = Math.min(q.ox + q.w - 1, Math.ceil(cx + r));
+  const y0 = Math.max(q.oy, Math.floor(cy - r)), y1 = Math.min(q.oy + q.h - 1, Math.ceil(cy + r));
+  for (let sy = y0; sy <= y1; sy++) {
+    const dy = (sy + 0.5 - cy) / r;
+    for (let sx = x0; sx <= x1; sx++) {
+      const dx = (sx + 0.5 - cx) / r, d = dx * dx + dy * dy;
       if (d >= 1) continue;
       const f = 1 - Math.sqrt(d);
-      q.light(px, py, c, f * f * k);
+      q.add(sx, sy, c, f * f * k);
     }
   }
 }
 
 const OUT = { c: 0, a: 1, b: 0, l: 0, k: 0 };
 /**
- * A per-pixel shader over the canvas rows y0..y1 (local, clipped to the canvas), much faster than p.shade for
- * whole-sky passes. fn(x, y, out) sets out.c (color) with out.a (alpha: dithered, or truly blended when out.b
- * is 1), and out.l / out.k (light color and amount). x, y are pixel centers. Falls back to p.shade when rotated.
+ * A bulk shader over canvas rows y0..y1 (local, clipped to the canvas). fn(x, y, out) sets color, continuous
+ * alpha and optional light. It keeps 1x weather passes inexpensive while routing scaled frames through Painter.
  */
 export function pass(p, meta, y0, y1, fn) {
   const B = box(meta), o = OUT;
   y0 = Math.max(B.y0, Math.floor(y0));
   y1 = Math.min(B.y1 - 1, Math.ceil(y1));
   if (y0 > y1) return;
-  if (p.sn !== 0) {
-    const q = clip(p, meta);
+  const q = clip(p, meta);
+  if (p.sn !== 0 || p.scale > 1) {
     for (let y = y0; y <= y1; y++)
       for (let x = B.x0; x < B.x1; x++) {
         o.c = 0; o.a = 1; o.b = 0; o.l = 0; o.k = 0;
         fn(x + 0.5, y + 0.5, o);
-        if (o.c) o.b ? q.blend(x, y, o.c, o.a) : q.dot(x, y, o.c, o.a);
+        if (o.c) q.dot(x, y, o.c, o.a);
         if (o.k > 0) q.light(x, y, o.l || o.c, o.k);
       }
     return;
   }
-  const C = p.C, L = p.L, W = p.w, fade = p.fade, lk = p.lightK * fade, fx = p.fx, tx = p.tx;
+  const W = p.w, fx = p.fx, tx = p.tx;
   for (let y = y0; y <= y1; y++) {
     const sy = Math.floor(p.ty + y + 0.5), ry = sy - p.oy;
     if (ry < 0 || ry >= p.h) continue;
-    const row = ry * W, by = (sy & 3) << 2;
     let sxf = tx + (B.x0 + 0.5) * fx;
     for (let x = B.x0; x < B.x1; x++, sxf += fx) {
       const sx = Math.floor(sxf), rx = sx - p.ox;
       if (rx < 0 || rx >= W) continue;
       o.c = 0; o.a = 1; o.b = 0; o.l = 0; o.k = 0;
       fn(x + 0.5, y + 0.5, o);
-      const i = row + rx;
-      if (o.c) {
-        const a = o.a * fade;
-        if (o.b) {
-          if (a > 0.004) {
-            const d = C[i], da = (d >>> 24) / 255, oa = a + da * (1 - a), k = a / oa, j = 1 - k, c = o.c;
-            const r = ((c & 255) * k + (d & 255) * j) & 255, g = (((c >>> 8) & 255) * k + ((d >>> 8) & 255) * j) & 255;
-            const b = (((c >>> 16) & 255) * k + ((d >>> 16) & 255) * j) & 255;
-            C[i] = (((oa * 255) & 255) << 24) | (b << 16) | (g << 8) | r;
-          }
-        } else if (a >= 1 || a > BAYER[by | (sx & 3)]) C[i] = o.c;
-      }
-      if (o.k > 0) {
-        const k = o.k * lk;
-        if (k > 0.004) {
-          const c = o.l || o.c, d = L[i];
-          const r = Math.min(255, (d & 255) + (c & 255) * k) | 0, g = Math.min(255, ((d >>> 8) & 255) + ((c >>> 8) & 255) * k) | 0;
-          const b = Math.min(255, ((d >>> 16) & 255) + ((c >>> 16) & 255) * k) | 0;
-          L[i] = (255 << 24) | (b << 16) | (g << 8) | r;
-        }
-      }
+      if (o.c) q.put(sx, sy, o.c, o.a);
+      if (o.k > 0) q.add(sx, sy, o.l || o.c, o.k);
     }
   }
 }
 
 const ROW = { w: 0, c: null, a: null, b: null, l: null, k: null };
 /**
- * The fastest whole-sky shader: fn(y, R) fills one canvas row at a time (y the row's pixel center), writing
- * R.c[i] (color, 0 for none), R.a[i] (alpha, default 1), R.b[i] (1: blend, 0: dither), R.l[i] / R.k[i] (light
+ * The fastest whole-sky shader: fn(y, R) fills one canvas row at a time (y the row's logical center), writing
+ * R.c[i] (color, 0 for none), R.a[i] (continuous alpha, default 1), R.b[i] (legacy blend hint), R.l[i] / R.k[i] (light
  * color and amount) for column i = x - box.x0. One call a row, so the effect's inner loop stays tight.
  */
 export function rows(p, meta, y0, y1, fn) {
@@ -123,57 +102,33 @@ export function rows(p, meta, y0, y1, fn) {
   if (R.w !== w) Object.assign(R, { w, c: new Uint32Array(w), a: new Float32Array(w), b: new Uint8Array(w), l: new Uint32Array(w), k: new Float32Array(w) });
   y0 = Math.max(B.y0, Math.floor(y0));
   y1 = Math.min(B.y1 - 1, Math.ceil(y1));
-  const rot = p.sn !== 0, q = rot ? clip(p, meta) : null;
-  const C = p.C, L = p.L, W = p.w, fade = p.fade, lk = p.lightK * fade, fx = p.fx;
+  const smooth = p.sn !== 0 || p.scale > 1, q = clip(p, meta), W = p.w, fx = p.fx;
   for (let y = y0; y <= y1; y++) {
     R.c.fill(0);
     R.k.fill(0);
     R.a.fill(1);
     R.b.fill(0);
     fn(y + 0.5, R);
-    if (rot) {
+    if (smooth) {
       for (let i = 0; i < w; i++) {
-        if (R.c[i]) R.b[i] ? q.blend(B.x0 + i, y, R.c[i], R.a[i]) : q.dot(B.x0 + i, y, R.c[i], R.a[i]);
+        if (R.c[i]) q.dot(B.x0 + i, y, R.c[i], R.a[i]);
         if (R.k[i] > 0) q.light(B.x0 + i, y, R.l[i] || R.c[i], R.k[i]);
       }
       continue;
     }
     const sy = Math.floor(p.ty + y + 0.5), ry = sy - p.oy;
     if (ry < 0 || ry >= p.h) continue;
-    const row = ry * W, by = (sy & 3) << 2;
     let sxf = p.tx + (B.x0 + 0.5) * fx;
     for (let i = 0; i < w; i++, sxf += fx) {
       const c = R.c[i], kk = R.k[i];
       if (!c && !(kk > 0)) continue;
       const sx = Math.floor(sxf), rx = sx - p.ox;
       if (rx < 0 || rx >= W) continue;
-      const j = row + rx;
-      if (c) {
-        const a = R.a[i] * fade;
-        if (R.b[i]) {
-          if (a > 0.004) {
-            const d = C[j], da = (d >>> 24) / 255, oa = a + da * (1 - a), k = a / oa, m = 1 - k;
-            const r = ((c & 255) * k + (d & 255) * m) & 255, g = (((c >>> 8) & 255) * k + ((d >>> 8) & 255) * m) & 255;
-            const b = (((c >>> 16) & 255) * k + ((d >>> 16) & 255) * m) & 255;
-            C[j] = (((oa * 255) & 255) << 24) | (b << 16) | (g << 8) | r;
-          }
-        } else if (a >= 1 || a > BAYER[by | (sx & 3)]) C[j] = c;
-      }
-      if (kk > 0) {
-        const k = kk * lk;
-        if (k > 0.004) {
-          const lc = R.l[i] || c, d = L[j];
-          const r = Math.min(255, (d & 255) + (lc & 255) * k) | 0, g = Math.min(255, ((d >>> 8) & 255) + ((lc >>> 8) & 255) * k) | 0;
-          const b = Math.min(255, ((d >>> 16) & 255) + ((lc >>> 16) & 255) * k) | 0;
-          L[j] = (255 << 24) | (b << 16) | (g << 8) | r;
-        }
-      }
+      if (c) q.put(sx, sy, c, R.a[i]);
+      if (kk > 0) q.add(sx, sy, R.l[i] || c, kk);
     }
   }
 }
-
-/** Ordered-dither threshold of a local pixel (0..1): `a > bayer(x, y)` draws it. */
-export const bayer = (x, y) => BAYER[((Math.floor(y) & 3) << 2) | (Math.floor(x) & 3)];
 
 const FIELDS = new Map();
 /**
@@ -286,7 +241,7 @@ export function splash(q, x, z, age, size, c, h) {
 /**
  * A crisp splash on a floor line, age seconds after a drop lands at (x, z): a crown for a few frames (a white
  * point, two arms rising), then a flat dash that spreads and breaks into two end dashes, and a droplet or two
- * arcing up and back. Solid pixels only (no dither), so a line of them stays clean. size 0..1, c = { hot, cool,
+ * arcing up and back. Solid marks with continuous coverage keep the line clean. size 0..1, c = { hot, cool,
  * white }, h a number unique to the drop. Returns false once it's over.
  */
 export function crown(q, x, z, age, size, c, h) {

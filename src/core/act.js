@@ -5,7 +5,7 @@
 
 import { Rng, clamp } from "./math.js";
 import { hex, mix } from "./color.js";
-import { createFrame, clearFrame, createFx, painterFor } from "./fx.js";
+import { createFrame, clearFrame, createFx, painterFor, composite, upscaleRGBA } from "./fx.js";
 import { stockActor, drawActor, actorAlphaOf, HERO2, DUMMY_PAL } from "./actor.js";
 import { posed, STAND } from "./rig.js";
 
@@ -227,10 +227,31 @@ export function createAct(mod, o = {}) {
     last = q;
     return q;
   };
-  let scratch = null;
+  let scratch = null, scaled = null;
   const scratchFor = (f) => {
     if (!scratch || scratch.a.w !== f.w || scratch.a.h !== f.h) scratch = { a: createFrame(f.w, f.h, f.ox, f.oy), b: createFrame(f.w, f.h, f.ox, f.oy) };
     return scratch;
+  };
+  const drawScaled = (source, target, scale) => {
+    const { w, h } = source, n = w * h, W = target.w, H = target.h;
+    if (!scaled || scaled.w !== w || scaled.h !== h || scaled.scale !== scale)
+      scaled = { w, h, scale, color: new Uint8ClampedArray(n * 4), colorOut: new Uint8ClampedArray(W * H * 4), light: new Uint8ClampedArray(n * 4), lightOut: new Uint8ClampedArray(W * H * 4) };
+    composite(source, scaled.color, null);
+    for (let i = 0; i < n; i++) {
+      const v = source.light[i], j = i * 4;
+      scaled.light[j] = v & 255; scaled.light[j + 1] = (v >>> 8) & 255; scaled.light[j + 2] = (v >>> 16) & 255; scaled.light[j + 3] = 255;
+    }
+    upscaleRGBA(scaled.color, w, h, scale, scaled.colorOut);
+    upscaleRGBA(scaled.light, w, h, scale, scaled.lightOut);
+    for (let i = 0; i < W * H; i++) {
+      const j = i * 4, a = scaled.colorOut[j + 3] / 255, c = target.color[i], da = (c >>> 24) / 255, oa = a + da * (1 - a);
+      if (oa > 0) {
+        const r = c & 255, g = (c >>> 8) & 255, b = (c >>> 16) & 255;
+        target.color[i] = (Math.round(oa * 255) << 24) | (Math.round((scaled.colorOut[j + 2] * a + b * da * (1 - a)) / oa) << 16) | (Math.round((scaled.colorOut[j + 1] * a + g * da * (1 - a)) / oa) << 8) | Math.round((scaled.colorOut[j] * a + r * da * (1 - a)) / oa);
+      }
+      const l = target.light[i];
+      target.light[i] = (255 << 24) | (Math.min(255, ((l >>> 16) & 255) + scaled.lightOut[j + 2]) << 16) | (Math.min(255, ((l >>> 8) & 255) + scaled.lightOut[j + 1]) << 8) | Math.min(255, (l & 255) + scaled.lightOut[j]);
+    }
   };
   const out = {
     fx, meta, act: a, targets,
@@ -301,6 +322,17 @@ export function createAct(mod, o = {}) {
     },
     /** Paint it. { body: false } leaves the character out, { target: false } the target. */
     draw(frame, { body = true, target: showTarget = true } = {}) {
+      const scale = frame.scale ?? 1;
+      if (scale > 1) {
+        if (frame.w % scale || frame.h % scale) throw new RangeError("scaled act frame dimensions must be divisible by its scale");
+        const w = frame.w / scale, h = frame.h / scale, ox = frame.ox / scale, oy = frame.oy / scale;
+        if (!scaled || !scaled.frame || scaled.w !== w || scaled.h !== h || scaled.scale !== scale || scaled.ox !== ox || scaled.oy !== oy)
+          scaled = { frame: createFrame(w, h, ox, oy), w, h, scale, ox, oy, color: new Uint8ClampedArray(w * h * 4), colorOut: new Uint8ClampedArray(frame.w * frame.h * 4), light: new Uint8ClampedArray(w * h * 4), lightOut: new Uint8ClampedArray(frame.w * frame.h * 4) };
+        clearFrame(scaled.frame);
+        out.draw(scaled.frame, { body, target: showTarget });
+        drawScaled(scaled.frame, frame, scale);
+        return;
+      }
       const W = frame.w, H = frame.h, q = last ?? poseNow(), active = t >= 0;
       const tgt = showTarget ? targets : [];
       const drawTargets = () => tgt.forEach((g) => g.draw(frame.color, W, H, FX, FY, flip));
@@ -328,7 +360,7 @@ export function createAct(mod, o = {}) {
         const px = mirror ? BX - r.xs[i] - 1 : BX + r.xs[i], py = BY + r.ys[i];
         if (px < 0 || py < 0 || px >= W || py >= H) return;
         frame.color[py * W + px] = color;
-        // he stays crisp in front of his own after-images
+        // keep the posed body clearly defined in front of its after-images
         if (ghosts.length) frame.light[py * W + px] = 0;
       };
       const drawGhosts = () => {

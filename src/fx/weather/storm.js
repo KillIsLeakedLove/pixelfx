@@ -2,7 +2,7 @@
 // the rain (streaks with lit heads, splashes that throw droplets) are adapted from Sprite Fusion's open-source
 // lightning (https://www.spritefusion.com/pixel-art-vfx/lightning), MIT License, Copyright (c) 2026 Hugo Duprez.
 import { Particles, P, Rng, fit, clamp, smooth, rand, wrap, TAU, WHITE, hex, mix, scale } from "../../core/index.js";
-import { clip, pass, box, field, sample, trips, tree, wave, bayer, splash } from "./_lib.js";
+import { clip, pass, box, field, sample, trips, tree, wave, splash } from "./_lib.js";
 
 export const meta = {
   name: "Storm",
@@ -170,13 +170,13 @@ function deck(q, B, t, S, C, V, litAt, lit) {
         if (prev >= 0 && prev < j) prevBot = cy;
         prev = j;
       }
-      const Rw = ROWS[j], d = bot[j] - cy, tone = Rw.tone, th = bayer(x, y);
+      const Rw = ROWS[j], d = bot[j] - cy, tone = Rw.tone;
       // light catches the lower edge of each row, most on the big bulges, and fades up into a dark core
       let i;
       if (d < 1) i = bulge[j] > 3 ? tone[3] : tone[3] - 1;
       else if (cy - prevBot < 1.5 && j > 0) i = Math.max(0, tone[0] - 1); // shadow under the row in front
-      else if (d < 2 + bulge[j] * 0.25 + th * 2) i = tone[2];
-      else if (d < 6 + bulge[j] * 0.4 + th * 3) i = tone[1];
+      else if (d < 2 + bulge[j] * 0.25) i = tone[2];
+      else if (d < 6 + bulge[j] * 0.4) i = tone[1];
       else {
         const nn = sample(F, cx * 0.9 + j * 77 - drift * (0.6 - j * 0.12), cy * 1.7 + j * 31);
         i = tone[0] + (Rw.tex && nn > 0.6 ? 1 : 0);

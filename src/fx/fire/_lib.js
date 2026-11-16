@@ -94,6 +94,7 @@ export function flameBlade(p, x, y, ux, uy, len, w, bend, N, n, H, layers = LAYE
 /** A solid disc drawn straight in screen space (fast; a disc looks the same mirrored or turned). */
 export function solid(p, x, y, r, c) {
   if (r < 0.6) return p.px(x, y, c);
+  if (p.scale > 1) return p.circle(x, y, r, c);
   const cx = p.toX(x, y), cy = p.toY(x, y), r2 = r * r;
   for (let sy = Math.floor(cy - r); sy <= Math.ceil(cy + r); sy++) {
     const dy = sy + 0.5 - cy, s2 = r2 - dy * dy;
@@ -107,6 +108,7 @@ export function solid(p, x, y, r, c) {
 export function soft(p, x, y, r, c, a) {
   if (a <= 0.004) return;
   if (r < 0.5) return p.blend(x, y, c, a);
+  if (p.scale > 1) return p.disc(x, y, r, c, a);
   const cx = p.toX(x, y), cy = p.toY(x, y), r2 = r * r;
   for (let sy = Math.floor(cy - r); sy <= Math.ceil(cy + r); sy++) {
     const dy = sy + 0.5 - cy, s2 = r2 - dy * dy;

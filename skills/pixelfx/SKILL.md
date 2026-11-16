@@ -1,15 +1,16 @@
 ---
 name: pixelfx
-description: Make pixel art effects and sprite animations in code with the pixelfx library, which has 244 ready-made ones, acted out by a character who winds up, freezes on contact and recovers (fire, explosions, water, ice, lightning, sci-fi, melee, impacts, projectiles, spawn and death, arcane, holy, shadow, status, nature, weather, UI, pickups, transitions, critters) to drop into a game, recolor, export as sprite sheets or remix, plus a draft, render, look, refine loop that makes new ones look hand-animated. Use when someone wants pixel art VFX, sprite animations or sprite sheets, game juice, a specific effect ("a frost nova for my mage", "a coin pickup sparkle"), wants to use or export a pixelfx effect in Godot, Unity, Phaser or a canvas game, or wants their pixel effects to look better.
+description: Create smooth high-definition 2D effects and sprite animations with pixelfx, whose 244 effects can be played, recolored, exported as 4x sprite sheets or remixed. Use for game VFX, a specific effect, exporting or adapting effects in Godot, Unity, Phaser or canvas games, and adding new effects with a render-and-refine workflow.
 license: MIT
 compatibility: Node 18 or newer. ffmpeg is optional (GIF and MP4 previews).
 ---
 
 # pixelfx
 
-Pixel art effects as code. Each effect is one file, `src/fx/<category>/<name>.js`, that draws into two buffers:
-**color** (pixels: opaque, dithered or truly translucent) and **light** (additive glow). No images, so an effect
-can be played live, recolored, mirrored, reseeded and rendered to a sprite sheet for any engine.
+Smooth high-definition 2D effects as code. Each effect is one file, `src/fx/<category>/<name>.js`, that draws into
+two buffers: **color** (continuous RGBA coverage) and **light** (additive glow). Logical coordinates and timing stay
+stable while output uses denser samples. Effects can be played live, recolored, mirrored, reseeded and exported as
+4x sprite sheets for any engine.
 
 The method is Hugo Duprez's ([How to make (good) pixel art effects with
 Claude](https://www.spritefusion.com/blog/how-to-make-good-pixel-art-effects-with-claude)): code is clay, trust
@@ -45,8 +46,9 @@ has no dependencies; copy `src/core` and the effect files you need, or depend on
 import { createFrame, clearFrame, createFx, composite } from "pixelfx";   // src/core/index.js
 import * as frostNova from "pixelfx/fx/ice/frost-nova";                   // src/fx/ice/frost-nova.js
 
-const frame = createFrame(320, 180);            // the game's pixel resolution; ox, oy scroll it with the camera
-const img = new ImageData(320, 180);
+const scale = 4;                                // output resolution; effect coordinates stay logical
+const frame = createFrame(320 * scale, 180 * scale, 0, 0, scale);
+const img = new ImageData(frame.w, frame.h);
 const fx = createFx(frostNova, { x: hero.x, y: hero.y, flip: hero.facing < 0 });
 
 // every tick
@@ -56,7 +58,7 @@ fx.draw(frame, "back");    // what goes behind characters
 drawCharacters();          // your own sprites, or draw them into frame.color yourself
 fx.draw(frame, "front");
 composite(frame, img.data, background);   // color over the background plus light; or null for transparent
-ctx.putImageData(img, 0, 0);              // then scale the canvas up with image-rendering: pixelated
+ctx.putImageData(img, 0, 0);              // keep normal smooth filtering if the canvas is resized
 if (fx.done()) removeIt();               // one-shots end on their own; fx.stop() fades a loop out
 ```
 
@@ -66,9 +68,10 @@ render the effect to a sprite sheet once (below) and play it like any other anim
 **Any engine** (Godot, Unity, GameMaker, Defold, LÖVE, Bevy, Construct): export sprite sheets.
 `node tools/render.mjs ice/frost-nova --sheet` writes `records/ice/frost-nova/frost-nova.png` (transparent
 frames in a grid) and `frost-nova.json` (Aseprite-style frames, so Phaser's atlas loader, Godot and Unity Aseprite
-importers and most tools read it; `meta.pixelfx` has fps, loop, frame size, columns and the pivot). Set the
-pivot to `meta.pixelfx.pivot` (the effect's origin, e.g. the feet), import with nearest-neighbour filtering and no
-compression, and play at `meta.pixelfx.fps`. Glow is baked into the sheet as color with alpha, which reads as
+importers and most tools read it; `meta.pixelfx` has fps, loop, physical and logical frame sizes, scale, columns and
+the pivot). Set the pivot to `meta.pixelfx.pivot` (the effect's origin, e.g. the feet), use linear filtering and
+avoid lossy compression, and play at `meta.pixelfx.fps`. Sheets export at 4x by default; pass `--scale 1` for
+logical-size output. Glow is baked into the sheet as color with alpha, which reads as
 additive over dark scenes; for bright scenes, render a recolored version or keep the effect on a dark layer.
 
 For the full library: `node tools/render.mjs <category> --sheet` does a whole category.
@@ -102,7 +105,7 @@ Then:
    direction is open, write 3 to 5 genuinely different drafts (`<name>-a.js` .. `-e.js`), render them all
    (`node tools/render.mjs "<category>/<name>-*"`) and look at every contact sheet before choosing. Show the user
    the strongest two or three if they're around (`--gif` makes animations to share).
-4. **Look, judge, fix.** Render, open `records/<id>/contact.png`, and judge like a picky pixel artist. Fix the
+4. **Look, judge, fix.** Render, open `records/<id>/contact.png`, and judge as a VFX artist. Fix the
    worst thing, render again. Three rounds minimum; a showpiece takes more. `--all` shows every frame,
    `--mp4` shows motion at full speed.
 5. **Act it out** if a character is involved: add `export const act` (see "Acts" in `docs/AUTHORING.md`), with a wind-up before t = 0,
@@ -116,16 +119,16 @@ What to look for, and the usual fix:
 
 | you see | fix |
 |---|---|
-| it reads as mush at 1x | fewer colors, a clear silhouette, one focal point, bigger shapes |
-| speckle: lone noise pixels inside shapes | threshold noise less, quantize with `at()`, no noise on small shapes |
+| it reads as mush | reduce overlapping layers, clarify the silhouette and focal point, vary shape scale |
+| speckle or grain inside a surface | remove decorative per-cell noise; use broad, animated variation only when it explains material or motion |
 | floaty, no punch | fast in, slow out (`ease.outQuart`/`outExpo`), a 1 to 2 frame white hero frame, shorter total time |
 | stiff or mechanical | vary every particle (size, speed, delay, life), add secondary motion (sparks, smoke, debris) |
 | washed out | less glow (k 0.2 to 0.5), darker edge steps, keep white for the hottest core only |
 | flat | light from one side: brighter top-left, darker bottom-right step; a darker ramp step at the base |
-| smooth gradients, vector look | hard ramp steps in color; softness only in light and in translucent smoke |
+| soft edges feel blurry | keep geometry crisp and use continuous coverage; reserve broad softness for light and translucent volumes |
 | a checkerboard where smoke should be | `SMOKE`, `VAPOUR` or `DUST` particles, or `p.disc`: truly translucent, lit on top |
 | seam when a loop wraps | `cycle`, `loopNoise(phase)`, whole-cell `tileNoise` scrolls, `sin(phase * TAU * n)` |
-| a one-shot that pops off | let it shrink, dither out or fall away before t = duration |
+| a one-shot that pops off | let it shrink, fade through alpha or fall away before t = duration |
 | a great effect on a dead character | give it an act: wind-up, release pose, freeze on contact, a target that reacts, recovery |
 | the act feels weightless | a wind-up the opposite way to the blow, a longer freeze (up to 0.2 s), a bigger silhouette change, shake |
 | the hit lands out of sync | move the hit key to the effect's own constant, not to a time you eyeballed |
@@ -140,8 +143,8 @@ sprites, characters or logos.
 
 If the game can't run JS and a sprite sheet isn't enough (an effect that follows a moving target, or needs
 per-instance colors at runtime), port the effect. Pure effects are a function of time; simulated ones step the particles in
-`src/core/sim.js`. Keep the two-buffer idea, the 4x4 Bayer threshold for dithered alpha and the palette ramp lookups.
-Render the JS original and your port side by side to check they match.
+`src/core/sim.js`. Keep continuous alpha coverage, the two-buffer color/light model and palette ramp lookups. Use
+the sheet's scale and physical pivot in the target engine; compare a native-size render and the 4x export side by side.
 
 ## 5. Publish it on Patch
 

@@ -19,14 +19,14 @@ function el(tag, props = {}, kids = []) {
   return e;
 }
 
-// ---- a live effect on a canvas, at an integer scale that fits the stage
+// ---- a live effect on a high-density canvas that fits the stage
 class Player {
   constructor(canvas, fx, aspect, pad) {
     Object.assign(this, { canvas, fx, ctx: canvas.getContext("2d"), opts: {}, flip: false, actor: true, speed: 1, playing: true });
     this.bg = fx.meta.bg;
     this.layout(aspect, pad);
   }
-  // the art-pixel stage: the effect's canvas plus some room, stretched to the tile's aspect; CSS scales it up
+  // The logical stage keeps the effect's coordinate system; the backing canvas adds detail for high-DPI screens.
   layout(aspect, pad) {
     Object.assign(this, { aspect, pad });
     // an act needs room for the whole performance, not just the effect's canvas
@@ -39,19 +39,18 @@ class Player {
     this.x = Math.floor((this.W - w) / 2) + ox;
     // an act stands near the bottom of its tile, with the room above it
     this.y = acted ? Math.max(oy + 2, this.H - b.y1 - 2) : Math.floor((this.H - h) / 2) + oy;
-    this.canvas.width = this.W;
-    this.canvas.height = this.H;
-    // shrinking pixel art nearest-neighbour drops whole 1 px lines; smooth it only when it has to shrink
-    const shown = this.canvas.getBoundingClientRect().width * devicePixelRatio;
-    this.canvas.style.imageRendering = shown && shown < this.W ? "auto" : "";
-    this.frame = createFrame(this.W, this.H);
-    this.img = this.ctx.createImageData(this.W, this.H);
+    this.renderScale = Math.max(2, Math.min(3, Math.ceil(devicePixelRatio || 1)));
+    this.canvas.width = this.W * this.renderScale;
+    this.canvas.height = this.H * this.renderScale;
+    this.ctx.imageSmoothingEnabled = true;
+    this.frame = createFrame(this.canvas.width, this.canvas.height, 0, 0, this.renderScale);
+    this.img = this.ctx.createImageData(this.frame.w, this.frame.h);
     this.setBg(this.bg);
     this.restart();
   }
   setBg(kind) {
     this.bg = kind;
-    this.bgBuf = kind === "none" ? null : backdrop(kind, this.W, this.H, this.y);
+    this.bgBuf = kind === "none" ? null : backdrop(kind, this.frame.w, this.frame.h, this.y * this.renderScale, this.renderScale);
     this.dirty = true;
   }
   // an effect with an act plays it, unless the character is switched off
@@ -89,8 +88,8 @@ class Player {
       this.inst.draw(f);
       composite(f, this.img.data, this.bgBuf);
       const [sx, sy] = this.inst.shake;
-      if (sx || sy) this.ctx.clearRect(0, 0, this.W, this.H);
-      this.ctx.putImageData(this.img, sx, sy);
+      if (sx || sy) this.ctx.clearRect(0, 0, this.frame.w, this.frame.h);
+      this.ctx.putImageData(this.img, sx * this.renderScale, sy * this.renderScale);
       this.dirty = false;
       return;
     }
@@ -240,32 +239,37 @@ function code(fx) {
     `import { createFrame, ${make}, composite } from "pixelfx";`,
     `import * as ${v} from "pixelfx/fx/${fx.id}";`,
     ``,
-    `const frame = createFrame(320, 180);`,
+    `const scale = 4;`,
+    `const frame = createFrame(320 * scale, 180 * scale, 0, 0, scale);`,
+    `const canvas = document.querySelector("canvas");`,
+    `const ctx = canvas.getContext("2d");`,
+    `const imageData = ctx.createImageData(frame.w, frame.h);`,
     `const fx = ${make}(${v}, ${JSON.stringify(opts).replace(/"\[…\]"/, "[…]").replace(/"(\w+)":/g, "$1: ").replace(/,/g, ", ")});`,
     ``,
     `// every tick`,
     `fx.update(dt);`,
     `fx.draw(frame);          // color + light buffers`,
     `composite(frame, imageData.data, null);`,
+    `ctx.putImageData(imageData, 0, 0);`,
     ...(acted ? [``, `// your own character? read the timing: ${v}.act (poses, hits, freezes)`] : []),
   ].join("\n");
   $("#d-src").href = `${REPO}/blob/main/src/fx/${fx.id}.js`;
 }
 function sheet() {
   const fx = detail.fx, m = fx.meta, [w, h] = m.size, n = Math.max(1, Math.round(m.duration * m.fps) + (m.loop ? 0 : 1));
+  const k = 4;
   const cols = Math.min(n, Math.max(1, Math.ceil(Math.sqrt((n * h) / w)))), rows = Math.ceil(n / cols);
-  const cv = el("canvas", { width: cols * w, height: rows * h }), ctx = cv.getContext("2d");
-  const frame = createFrame(w, h), img = ctx.createImageData(w, h);
+  const cv = el("canvas", { width: cols * w * k, height: rows * h * k }), ctx = cv.getContext("2d");
+  const frame = createFrame(w * k, h * k, 0, 0, k), img = ctx.createImageData(frame.w, frame.h);
   const inst = createFx(fx.mod, { x: m.origin[0], y: m.origin[1], ...detail.opts, flip: detail.flip });
   for (let i = 0; i < n; i++) {
     if (i) inst.update(1 / m.fps);
     inst.draw(clearFrame(frame));
     composite(frame, img.data, null);
-    ctx.putImageData(img, (i % cols) * w, Math.floor(i / cols) * h);
+    ctx.putImageData(img, (i % cols) * w * k, Math.floor(i / cols) * h * k);
   }
-  const k = Math.max(1, Math.min(4, Math.floor(1100 / (cols * w))));
-  const pic = el("img", { src: cv.toDataURL("image/png"), alt: `${m.name} sprite sheet`, width: cols * w * k, height: rows * h * k });
-  $("#d-sheet").replaceChildren(pic, el("p", { textContent: `${n} frames of ${w} × ${h} px, ${cols} across, ${m.fps} fps, ${m.loop ? "loops" : "plays once"}. Save the image, or run: node tools/render.mjs ${fx.id} --sheet` }));
+  const pic = el("img", { src: cv.toDataURL("image/png"), alt: `${m.name} sprite sheet at ${k}x resolution`, width: cols * w * k, height: rows * h * k });
+  $("#d-sheet").replaceChildren(pic, el("p", { textContent: `${n} frames at ${w} × ${h} logical px, exported at ${k}x HD resolution, ${cols} across, ${m.fps} fps, ${m.loop ? "loops" : "plays once"}. Save the image, or run: node tools/render.mjs ${fx.id} --sheet` }));
 }
 function wireDetail() {
   const d = $("#detail");

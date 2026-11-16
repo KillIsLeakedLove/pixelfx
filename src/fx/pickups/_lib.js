@@ -78,7 +78,7 @@ export class Layer {
     for (let k = 0; k < C.length; k++) if (C[k]) C[k] = fn((k % f.w) + f.ox, Math.floor(k / f.w) + f.oy, C[k]) || C[k];
     return this;
   }
-  /** Stamp the layer onto p, offset by (dx, dy), at alpha a (dithered); clip [x0, x1] keeps x0 <= x < x1. */
+  /** Stamp the layer onto p, offset by (dx, dy), at alpha a; clip [x0, x1] keeps x0 <= x < x1. */
   draw(p, dx = 0, dy = 0, a = 1, clip = null) {
     const f = this.f, C = f.color;
     for (let k = 0; k < C.length; k++) {
@@ -94,7 +94,7 @@ export class Layer {
 const SHADOW = hex("#100e17");
 /**
  * A floor shadow centered on x, half-width rx: a solid dark band on the floor line (y = 0) and a narrower one
- * under it, with dithered ends. Shrink rx as the thing above rises.
+ * under it, with softly fading ends. Shrink rx as the thing above rises.
  */
 export function shadow(p, x, rx, k = 1) {
   if (rx < 1) return;
@@ -155,7 +155,7 @@ export function heartSdf(x, y, cx, cy, w, h = w) {
 const INK = hex("#0b0814");
 
 /**
- * A soft floor shadow at x, half-width rx: dithered darkness on the floor line, fuller in the middle, with a
+ * A soft floor shadow at x, half-width rx: smoothly fading darkness on the floor line, fuller in the middle, with a
  * shorter second row under it. k (0..1) is its strength: lift the thing above and the shadow shrinks and thins.
  */
 export function blobShadow(p, x, rx, k = 1, y = 0) {

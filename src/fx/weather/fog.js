@@ -1,8 +1,8 @@
-// The banded fog (a baked tiling noise, warped, cut into a few translucent tones with Bayer edges, a lit crest
-// wherever a band's top meets thinner fog) is adapted from Sprite Fusion's open-source fog
+// The layered fog (baked tiling noise, broad translucent tones, a lit crest where a bank meets thinner fog)
+// is adapted from Sprite Fusion's open-source fog
 // (https://www.spritefusion.com/pixel-art-vfx/fog), MIT License, Copyright (c) 2026 Hugo Duprez.
 import { fit, clamp, smooth, mix, TAU, WHITE } from "../../core/index.js";
-import { rows, field, sample, bayer } from "./_lib.js";
+import { rows, field, sample } from "./_lib.js";
 
 export const meta = {
   name: "Fog",
@@ -21,7 +21,7 @@ export const meta = {
 };
 
 const D = 12, W = 320;
-const T = [0.3, 0.5, 0.7], BW = 0.06;
+const T = [0.3, 0.5, 0.7];
 // far to near: where each bank's top thins out (top..base), how far down it reaches, noise scale (the tile it
 // scrolls each loop is 256 / sx px wide), tiles a loop, how opaque, tones [thin, body, dense], crest tone
 const BANKS = [
@@ -64,7 +64,7 @@ function bank(p, t, S, C, n) {
       prev2[i] = prev1[i];
       prev1[i] = f;
       if (f <= T[0]) continue;
-      const th = bayer(i, y) * BW, band = f > T[2] + th ? 2 : f > T[1] + th ? 1 : 0, solid = f > T[2] ? 2 : f > T[1] ? 1 : 0;
+      const band = f > T[2] ? 2 : f > T[1] ? 1 : 0, solid = band;
       // a lit crest, one pixel thick, where this band's top meets thinner fog
       if (solid >= B.crestFrom && above < T[solid]) {
         R.c[i] = crest;

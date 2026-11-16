@@ -4,7 +4,7 @@ import { readdirSync, existsSync, statSync, writeFileSync, mkdirSync } from "nod
 import { join, dirname, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
-import { createFrame, clearFrame, createFx, createAct, actBounds, actTiming, composite, painterFor, drawActor, stockActor, backdrop, actorAlphaOf } from "../../src/core/index.js";
+import { createFrame, clearFrame, createFx, createAct, actBounds, actTiming, composite, painterFor, drawActor, stockActor, backdrop, actorAlphaOf, upscaleRGBA } from "../../src/core/index.js";
 import { rasterText, textWidth } from "../../src/core/font.js";
 import { encodePNG } from "./png.mjs";
 
@@ -52,11 +52,13 @@ export async function loadEffect(id, dir = FX_DIR) {
  */
 export function renderFrames(fx, opts = {}) {
   const { meta } = fx, [W, H] = meta.size, [OX, OY] = meta.origin, m = opts.margin ?? 0;
-  const w = W + m * 2, h = H + m * 2, fps = opts.fps ?? meta.fps;
+  const scale = opts.scale ?? 1;
+  if (!Number.isInteger(scale) || scale < 1) throw new RangeError("render scale must be a positive integer");
+  const logicalW = W + m * 2, logicalH = H + m * 2, w = logicalW * scale, h = logicalH * scale, fps = opts.fps ?? meta.fps;
   const n = Math.max(1, Math.round(meta.duration * fps) + (meta.loop ? 0 : 1));
-  const shown = createFrame(w, h, -m, -m), bare = createFrame(w, h, -m, -m);
+  const shown = createFrame(w, h, -m * scale, -m * scale, scale), bare = createFrame(w, h, -m * scale, -m * scale, scale);
   const bgKind = opts.bg ?? meta.bg;
-  const bg = bgKind === "none" ? null : backdrop(bgKind, w, h, OY + m);
+  const bg = bgKind === "none" ? null : backdrop(bgKind, w, h, (OY + m) * scale, scale);
   const inst = createFx(fx.mod, { x: OX, y: OY, ...(opts.seed !== undefined ? { seed: opts.seed } : {}), ...(opts.options ?? {}) });
   const actor = meta.actor && opts.actor !== false ? inst.options.actor ?? stockActor() : null;
   const fade = m === 0 && !isScreen(meta);
@@ -70,7 +72,7 @@ export function renderFrames(fx, opts = {}) {
     inst.draw(shown, "back");
     if (actor) drawActor(painterFor(shown).place(OX, OY, !!opts.options?.flip), actor, actorAlphaOf(fx.mod, fx.meta.loop ? inst.t % fx.meta.duration : Math.min(inst.t, fx.meta.duration), inst.options));
     inst.draw(shown, "front");
-    if (fade) (edgeFade(bare), edgeFade(shown));
+    if (fade) (edgeFade(bare, 8 * scale), edgeFade(shown, 8 * scale));
     frames.push({
       t: i / fps,
       color: composite(shown, new Uint8ClampedArray(w * h * 4), bg),
@@ -79,7 +81,7 @@ export function renderFrames(fx, opts = {}) {
       light: bare.light.slice(),
     });
   }
-  return { w, h, fps, n, frames, margin: m };
+  return { w, h, fps, n, frames, margin: m * scale, scale, logicalW, logicalH };
 }
 
 /**
@@ -87,16 +89,17 @@ export function renderFrames(fx, opts = {}) {
  * Returns { w, h, fps, n, frames: [{ t (effect time, negative before it starts), frozen, color }] }.
  */
 export function renderAct(fx, opts = {}) {
-  const { meta } = fx, fps = opts.fps ?? 60, b = actBounds(fx.mod), pad = opts.pad ?? 6;
-  const w = b.x1 - b.x0 + pad * 2, h = b.y1 - b.y0 + pad * 2, X = pad - b.x0, Y = pad - b.y0;
-  const frame = createFrame(w, h), bgKind = opts.bg ?? meta.bg, bg = bgKind === "none" ? null : backdrop(bgKind, w, h, Y);
+  const { meta } = fx, fps = opts.fps ?? 60, b = actBounds(fx.mod), pad = opts.pad ?? 6, scale = opts.scale ?? 1;
+  if (!Number.isInteger(scale) || scale < 1) throw new RangeError("render scale must be a positive integer");
+  const logicalW = b.x1 - b.x0 + pad * 2, logicalH = b.y1 - b.y0 + pad * 2, w = logicalW * scale, h = logicalH * scale, X = pad - b.x0, Y = pad - b.y0;
+  const frame = createFrame(w, h, 0, 0, scale), bgKind = opts.bg ?? meta.bg, bg = bgKind === "none" ? null : backdrop(bgKind, w, h, Y * scale, scale);
   const act = createAct(fx.mod, { x: X, y: Y, ...(opts.seed !== undefined ? { seed: opts.seed } : {}), ...(opts.options ?? {}) });
   const frames = [], max = Math.round((opts.seconds ?? (meta.loop ? meta.duration * 2 - act.t : 8)) * fps);
   const show = () => {
     clearFrame(frame);
     act.draw(frame, { body: opts.actor !== false, target: opts.target !== false });
     const rgba = composite(frame, new Uint8ClampedArray(w * h * 4), bg), [sx, sy] = act.shake;
-    frames.push({ t: act.t, frozen: act.frozen, color: sx || sy ? shifted(rgba, w, h, sx, sy) : rgba, clear: rgba });
+    frames.push({ t: act.t, frozen: act.frozen, color: sx || sy ? shifted(rgba, w, h, sx * scale, sy * scale) : rgba, clear: rgba });
   };
   show();
   for (let i = 0; i < max && !act.done(); i++) {
@@ -108,7 +111,7 @@ export function renderAct(fx, opts = {}) {
     act.update(1 / fps);
     show();
   }
-  return { w, h, fps, n: frames.length, frames, pivot: [X, Y] };
+  return { w, h, fps, n: frames.length, frames, pivot: [X * scale, Y * scale], logicalW, logicalH, logicalPivot: [X, Y], scale };
 }
 function shifted(rgba, w, h, sx, sy) {
   const out = new Uint8ClampedArray(w * h * 4);
@@ -142,17 +145,8 @@ export function edgeFade(f, E = 8) {
   }
 }
 
-/** Nearest-neighbour upscale of RGBA. */
-export function upscale(rgba, w, h, k) {
-  if (k === 1) return rgba;
-  const out = new Uint8ClampedArray(w * k * h * k * 4), src = new Uint32Array(rgba.buffer, rgba.byteOffset, w * h);
-  const dst = new Uint32Array(out.buffer);
-  for (let y = 0; y < h * k; y++) {
-    const sy = (y / k) | 0;
-    for (let x = 0; x < w * k; x++) dst[y * w * k + x] = src[sy * w + ((x / k) | 0)];
-  }
-  return out;
-}
+/** Bilinear upscale of RGBA in premultiplied-alpha space. */
+export const upscale = upscaleRGBA;
 
 /** A blank RGBA canvas with helpers to paste images and write labels. */
 export function canvas(w, h, fill = [12, 11, 16, 255]) {
@@ -219,7 +213,7 @@ export function contactSheet(fx, r, { max = 16, width = 1600, title, zoom } = {}
 
 /** A sprite sheet (transparent frames in a grid) plus Aseprite-style JSON that most engines import. */
 export function spriteSheet(fx, r, name) {
-  const { w, h, frames, fps } = r, n = frames.length;
+  const { w, h, frames, fps, scale = 1 } = r, n = frames.length;
   const cols = Math.min(n, Math.max(1, Math.ceil(Math.sqrt((n * h) / w)))), rows = Math.ceil(n / cols);
   const img = canvas(cols * w, rows * h, [0, 0, 0, 0]);
   const json = { frames: [], meta: {} };
@@ -236,7 +230,7 @@ export function spriteSheet(fx, r, name) {
     app: "https://github.com/patch-gg/pixelfx", version: "1", image: `${name}.png`, format: "RGBA8888",
     size: { w: cols * w, h: rows * h }, scale: "1",
     frameTags: [{ name: name, from: 0, to: n - 1, direction: "forward" }],
-    pixelfx: { id: fx.id, name: m.name, fps, loop: m.loop, frames: n, frameSize: [w, h], pivot: m.origin, columns: cols, ...(fx.mod.act ? { act: actTiming(fx.mod) } : {}) },
+    pixelfx: { id: fx.id, name: m.name, fps, loop: m.loop, frames: n, frameSize: [w, h], pivot: m.origin.map((v) => v * scale), logicalFrameSize: [w / scale, h / scale], logicalPivot: m.origin, scale, columns: cols, ...(fx.mod.act ? { act: actTiming(fx.mod) } : {}) },
   };
   return { png: img.png(), json };
 }

@@ -2,7 +2,7 @@
 // rings shocking out across the floor) is adapted from Sprite Fusion's open-source holy light
 // (https://www.spritefusion.com/pixel-art-vfx/holy-light), MIT License, Copyright (c) 2026 Hugo Duprez.
 import { Particles, Lights, P, Rng, PAL, fit, band, flare, sparkle, clamp, smooth, ease, noise2, fract, TAU, WHITE } from "../../core/index.js";
-import { floorRing, bayer, glyph } from "./_lib.js";
+import { floorRing, glyph } from "./_lib.js";
 
 // the circle on the floor (plane px; the floor squashes depth by SY), the column, the beats
 const R = 40, R2 = 35, RI = 24, RR = 30, SY = 0.3, TOP = 192, W = 11, NRUNE = 8;
@@ -139,8 +139,7 @@ export function create(o) {
         for (const s of strands) if (Math.abs((x + 0.5) / ww - s.o - 0.05 * Math.sin(t * s.f + s.o * 9)) < s.w) lv = Math.max(0, lv - 1);
         lv = white ? 0 : Math.max(0, lv - pulse);
         const a = (q < 0.88 ? 1 : (1.3 - q) / 0.42) * fade;
-        if (a <= bayer(x, y) * (q < 0.66 ? 0.2 : 1)) continue;
-        p.px(x, y, COL[lv]);
+        p.dot(x, y, COL[lv], a);
       }
       if ((h & 7) === 0 && h < TOP - ww * 2.4 - 8) p.glow(0, y, ww * 2.4 + 6, C[5], 0.3 * fade);
     }

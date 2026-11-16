@@ -4,26 +4,19 @@
 // (https://www.spritefusion.com/pixel-art-vfx/black-hole), and the arc drawing from its energy
 // (https://www.spritefusion.com/pixel-art-vfx/energy), MIT License, Copyright (c) 2026 Hugo Duprez.
 
-import { scale, clamp, bolt, luma, WHITE } from "../../core/index.js";
+import { scale, clamp, bolt, luma, mix, WHITE } from "../../core/index.js";
 
-const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
 const CROSS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-/** The 4x4 ordered-dither threshold (0..1) of the pixel cell holding (x, y). */
-export const bayer = (x, y) => BAYER[((Math.floor(y) & 3) << 2) | (Math.floor(x) & 3)];
 
 /**
- * Light intensity I (0..1) to a step of ramp R (dark to bright), dithering between neighbouring steps so a
- * gradient reads smooth at 1x; below lo it thins out through the dither and returns 0 (draw nothing).
+ * Light intensity I (0..1) interpolated smoothly through ramp R (dark to bright), optionally tightening the
+ * transitions between colors. Below lo it returns no color.
  */
-export function tone(R, I, x, y, lo = 0.06, sharp = 0) {
-  const b = bayer(x, y);
-  if (I < lo && b > I / lo) return 0;
-  const n = R.length - 1, f = clamp(I) * n;
-  let i = Math.floor(f);
-  // sharp (0..1) narrows the dithered zone between two steps, so broad areas stay clean and only edges dither
+export function tone(R, I, _x, _y, lo = 0.06, sharp = 0) {
+  if (I < lo) return 0;
+  const n = R.length - 1, f = clamp((I - lo) / (1 - lo)) * n, i = Math.min(n - 1, Math.floor(f));
   const q = sharp > 0 ? clamp((f - i - 0.5) / (1 - sharp) + 0.5) : f - i;
-  if (q > b) i = Math.min(n, i + 1);
-  return R[i];
+  return mix(R[i], R[i + 1], q);
 }
 
 /** A drifting mote at (x, y) moving (vx, vy) px/s, drawn like the sim's MOTE: bright head, darker tail, light. */

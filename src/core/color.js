@@ -39,7 +39,7 @@ export function fit(r, n) {
   if (r.length === n) return r;
   return Array.from({ length: n }, (_, i) => r[Math.round((i * (r.length - 1)) / Math.max(1, n - 1))]);
 }
-/** The ramp step for t in 0..1, no blending: pixel art picks a color, it doesn't fade between two. */
+/** The ramp step for t in 0..1 when a design calls for a controlled palette break. */
 export const at = (r, t) => r[clamp(Math.floor(t * r.length), 0, r.length - 1)];
 /** Blended color along a ramp (for light, where smooth is right). */
 export function blend(r, t) {

@@ -1,16 +1,15 @@
-// The painter draws into a frame's two buffers: `color` (opaque pixels, faded with ordered dither, never
-// blended) and `light` (additive glow, composited on top). Effects draw in local coordinates around their
+// The painter draws into a frame's two buffers: `color` (continuous alpha coverage) and `light` (additive glow,
+// composited on top). Effects draw in logical coordinates around their
 // origin; the painter places, mirrors and rotates them, so an effect never needs to know where it is.
 
 import { clamp } from "./math.js";
 import { hex } from "./color.js";
 import { rasterText, textWidth, FONTS } from "./font.js";
 
-// 4x4 ordered (Bayer) thresholds: a pixel at alpha a is drawn when a is above its cell's threshold.
-const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
 const OUT = { c: 0, a: 1, l: 0, k: 0 };
 const sprites = new WeakMap();
 const call = (v, ...args) => (typeof v === "function" ? v(...args) : v);
+const EDGE_SAMPLES = [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]];
 
 export class Painter {
   constructor(frame) {
@@ -21,7 +20,7 @@ export class Painter {
   /** Re-read the frame and clear placement, fade and light strength. */
   reset() {
     const f = this.frame;
-    this.w = f.w; this.h = f.h; this.ox = f.ox | 0; this.oy = f.oy | 0; this.C = f.color; this.L = f.light;
+    this.w = f.w; this.h = f.h; this.ox = f.ox | 0; this.oy = f.oy | 0; this.scale = f.scale ?? 1; this.C = f.color; this.L = f.light;
     this.tx = 0; this.ty = 0; this.fx = 1; this.cs = 1; this.sn = 0;
     this.fade = 1; this.lightK = 1; this.layer = "front";
     return this;
@@ -34,10 +33,10 @@ export class Painter {
   }
 
   // ---- transforms: local (effect) space <-> screen (frame) space
-  toX(x, y) { return this.tx + x * this.fx * this.cs - y * this.sn; }
-  toY(x, y) { return this.ty + x * this.fx * this.sn + y * this.cs; }
-  fromX(sx, sy) { const dx = sx - this.tx, dy = sy - this.ty; return (dx * this.cs + dy * this.sn) * this.fx; }
-  fromY(sx, sy) { const dx = sx - this.tx, dy = sy - this.ty; return -dx * this.sn + dy * this.cs; }
+  toX(x, y) { return (this.tx + x * this.fx * this.cs - y * this.sn) * this.scale; }
+  toY(x, y) { return (this.ty + x * this.fx * this.sn + y * this.cs) * this.scale; }
+  fromX(sx, sy) { const dx = sx - this.tx * this.scale, dy = sy - this.ty * this.scale; return ((dx * this.cs + dy * this.sn) / this.scale) * this.fx; }
+  fromY(sx, sy) { const dx = sx - this.tx * this.scale, dy = sy - this.ty * this.scale; return (-dx * this.sn + dy * this.cs) / this.scale; }
   // the screen pixel of the local pixel cell holding (x, y): mirrors and rotations land on whole cells
   cellX(x, y) { return Math.floor(this.toX(Math.floor(x) + 0.5, Math.floor(y) + 0.5)); }
   cellY(x, y) { return Math.floor(this.toY(Math.floor(x) + 0.5, Math.floor(y) + 0.5)); }
@@ -45,11 +44,11 @@ export class Painter {
   // ---- raw writes, screen space, whole pixels. Color 0 means "nothing": it never erases what's there.
   put(sx, sy, c, a = 1) {
     if (!c) return;
-    a *= this.fade;
-    if (a < 1 && a <= BAYER[((sy & 3) << 2) | (sx & 3)]) return;
     const x = sx - this.ox, y = sy - this.oy;
     if (x < 0 || y < 0 || x >= this.w || y >= this.h) return;
-    this.C[y * this.w + x] = c;
+    a *= this.fade;
+    if (a >= 1) this.C[y * this.w + x] = c;
+    else this.blendPx(sx, sy, c, a / Math.max(this.fade, 1e-9));
   }
   add(sx, sy, c, k = 1) {
     k *= this.fade * this.lightK;
@@ -64,27 +63,28 @@ export class Painter {
   }
   /**
    * Blend a color over what's there at alpha a (0..1), keeping the result's own alpha: soft smoke, vapour and
-   * mist. Use dithered dot() for hard pixel fades and blend() for translucent volumes.
+   * mist. `dot()` and `blend()` retain fractional alpha for smooth edges and fades.
    */
   blendPx(sx, sy, c, a) {
-    a *= this.fade;
+    a = clamp(a * this.fade);
     if (!c || a <= 0.004) return;
     const x = sx - this.ox, y = sy - this.oy;
     if (x < 0 || y < 0 || x >= this.w || y >= this.h) return;
-    const i = y * this.w + x, d = this.C[i], da = (d >>> 24) / 255, oa = a + da * (1 - a), k = a / oa;
-    const ch = (s) => ((((c >>> s) & 255) * k + ((d >>> s) & 255) * (1 - k)) & 255);
-    this.C[i] = (((oa * 255) & 255) << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0);
+    const i = y * this.w + x, d = this.C[i], da = (d >>> 24) / 255, oa = a + da * (1 - a);
+    const ch = (s) => Math.round((((c >>> s) & 255) * a + ((d >>> s) & 255) * da * (1 - a)) / oa);
+    this.C[i] = (Math.round(oa * 255) << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0);
   }
-  /** Translucent pixel at a local point. */
-  blend(x, y, c, a) { this.blendPx(this.cellX(x, y), this.cellY(x, y), c, a); }
+  /** Translucent soft mark at a local point. */
+  blend(x, y, c, a) { this.circle(x + 0.5, y + 0.5, 0.82, c, a); }
   /** A translucent disc: puffs of smoke, vapour, dust. c and a may be functions of (d: 0 center..1 rim, angle). */
   disc(cx, cy, r, c, a) {
     if (r < 0.5) return this.blend(cx, cy, call(c, 0, 0), call(a, 0, 0));
-    this.each(cx - r, cy - r, cx + r, cy + r, (x, y, sx, sy) => {
+    this.shade(cx - r, cy - r, cx + r, cy + r, (x, y, o) => {
       const dx = x - cx, dy = y - cy, d2 = dx * dx + dy * dy;
       if (d2 > r * r) return;
       const d = Math.sqrt(d2) / r, ang = Math.atan2(dy, dx);
-      this.blendPx(sx, sy, call(c, d, ang), call(a, d, ang));
+      o.c = call(c, d, ang);
+      o.a = call(a, d, ang);
     });
   }
   /** Read back the color under a local point (0 if empty). */
@@ -94,12 +94,12 @@ export class Painter {
   }
 
   // ---- pixels
-  /** One opaque pixel. */
-  px(x, y, c) { this.put(this.cellX(x, y), this.cellY(x, y), c, 1); }
-  /** One pixel at alpha a (0..1), faded by ordered dither. */
-  dot(x, y, c, a = 1) { if (a > 0) this.put(this.cellX(x, y), this.cellY(x, y), c, a); }
+  /** One softly edged mark. */
+  px(x, y, c) { this.circle(x + 0.5, y + 0.5, 0.82, c); }
+  /** One softly edged mark at alpha a (0..1). */
+  dot(x, y, c, a = 1) { if (a > 0) this.circle(x + 0.5, y + 0.5, 0.82, c, a); }
   /** Add light to one pixel. */
-  light(x, y, c, k = 1) { this.add(this.cellX(x, y), this.cellY(x, y), c, k); }
+  light(x, y, c, k = 1) { this.glow(x + 0.5, y + 0.5, 1, c, k); }
 
   /**
    * Visit every screen pixel whose center falls in the local box [x0, x1] x [y0, y1], with that center in
@@ -127,29 +127,37 @@ export class Painter {
   shade(x0, y0, x1, y1, fn) {
     const o = OUT;
     this.each(x0, y0, x1, y1, (lx, ly, sx, sy) => {
-      o.c = 0; o.a = 1; o.l = 0; o.k = 0;
-      const c = fn(lx, ly, o) || o.c;
-      if (c) this.put(sx, sy, c, o.a);
-      if (o.k > 0) this.add(sx, sy, o.l || c, o.k);
+      const samples = this.scale === 1 ? EDGE_SAMPLES : [[0.5, 0.5]];
+      let alpha = 0, red = 0, green = 0, blue = 0, light = 0, lr = 0, lg = 0, lb = 0;
+      for (const [dx, dy] of samples) {
+        const x = this.fromX(sx + dx, sy + dy), y = this.fromY(sx + dx, sy + dy);
+        o.c = 0; o.a = 1; o.l = 0; o.k = 0;
+        const c = fn(x, y, o) || o.c;
+        if (c) {
+          const a = clamp(o.a);
+          alpha += a;
+          red += (c & 255) * a; green += ((c >>> 8) & 255) * a; blue += ((c >>> 16) & 255) * a;
+        }
+        if (o.k > 0) {
+          const k = Math.max(0, o.k), color = o.l || c;
+          if (color) { light += k; lr += (color & 255) * k; lg += ((color >>> 8) & 255) * k; lb += ((color >>> 16) & 255) * k; }
+        }
+      }
+      if (alpha > 0) {
+        const n = samples.length, c = (0xff000000 | (Math.round(blue / alpha) << 16) | (Math.round(green / alpha) << 8) | Math.round(red / alpha)) >>> 0;
+        this.put(sx, sy, c, alpha / n);
+      }
+      if (light > 0) {
+        const n = samples.length, c = ((Math.round(lb / light) << 16) | (Math.round(lg / light) << 8) | Math.round(lr / light)) >>> 0;
+        this.add(sx, sy, c, light / n);
+      }
     });
   }
 
   // ---- shapes. Colors (c) and alphas (a) can be numbers or functions of the shape's own coordinates.
   /** 1 px line. c and a may be functions of u (0 at the start, 1 at the end). */
   line(x0, y0, x1, y1, c, a = 1) {
-    let sx = this.cellX(x0, y0), sy = this.cellY(x0, y0);
-    const ex = this.cellX(x1, y1), ey = this.cellY(x1, y1);
-    const dx = Math.abs(ex - sx), dy = -Math.abs(ey - sy), stepx = sx < ex ? 1 : -1, stepy = sy < ey ? 1 : -1;
-    const n = Math.max(dx, -dy) || 1, fc = typeof c === "function", fa = typeof a === "function";
-    let err = dx + dy, i = 0;
-    for (;;) {
-      const u = i++ / n;
-      this.put(sx, sy, fc ? c(u) : c, fa ? a(u) : a);
-      if (sx === ex && sy === ey) break;
-      const e2 = 2 * err;
-      if (e2 >= dy) { err += dy; sx += stepx; }
-      if (e2 <= dx) { err += dx; sy += stepy; }
-    }
+    this.beam(x0, y0, x1, y1, 1, c, a);
   }
   /** Lines through a list of points [[x, y], ...]. */
   polyline(pts, c, a = 1) {
@@ -222,11 +230,6 @@ export class Painter {
   }
   /** Filled rectangle. */
   rect(x, y, w, h, c, a = 1) {
-    if (this.sn === 0) {
-      const X0 = Math.round(x), Y0 = Math.round(y), X1 = Math.round(x + w), Y1 = Math.round(y + h);
-      for (let yy = Y0; yy < Y1; yy++) for (let xx = X0; xx < X1; xx++) this.put(this.cellX(xx, yy), this.cellY(xx, yy), c, a);
-      return;
-    }
     this.shade(x, y, x + w, y + h, (lx, ly, o) => {
       if (lx < x || ly < y || lx >= x + w || ly >= y + h) return;
       o.c = c; o.a = a;
@@ -255,6 +258,7 @@ export class Painter {
   glow(x, y, r, c, k = 0.5) {
     if (r < 1 || k <= 0.004) return;
     const cx = this.toX(x, y), cy = this.toY(x, y);
+    r *= this.scale;
     const x0 = Math.floor(cx - r), x1 = Math.ceil(cx + r), y0 = Math.floor(cy - r), y1 = Math.ceil(cy + r);
     for (let sy = y0; sy <= y1; sy++) {
       const dy = (sy + 0.5 - cy) / r;
@@ -270,6 +274,7 @@ export class Painter {
   glowLine(x0, y0, x1, y1, r, c, k = 0.5) {
     if (r < 1 || k <= 0.004) return;
     const ax = this.toX(x0, y0), ay = this.toY(x0, y0), bx = this.toX(x1, y1), by = this.toY(x1, y1);
+    r *= this.scale;
     const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1e-9;
     const X0 = Math.floor(Math.min(ax, bx) - r), X1 = Math.ceil(Math.max(ax, bx) + r);
     const Y0 = Math.floor(Math.min(ay, by) - r), Y1 = Math.ceil(Math.max(ay, by) + r);
@@ -285,7 +290,9 @@ export class Painter {
   /** Glow hugging a circle of radius R (a shockwave's light), falling off over width r. */
   glowRing(x, y, R, r, c, k = 0.5) {
     if (r < 1 || k <= 0.004) return;
-    const cx = this.toX(x, y), cy = this.toY(x, y), E = R + r;
+    const cx = this.toX(x, y), cy = this.toY(x, y);
+    R *= this.scale; r *= this.scale;
+    const E = R + r;
     for (let sy = Math.floor(cy - E); sy <= Math.ceil(cy + E); sy++)
       for (let sx = Math.floor(cx - E); sx <= Math.ceil(cx + E); sx++) {
         const d = Math.abs(Math.hypot(sx + 0.5 - cx, sy + 0.5 - cy) - R) / r;
@@ -297,31 +304,40 @@ export class Painter {
 
   // ---- sprites, text, masks
   /**
-   * A little sprite from strings: rows like ["..##..", ".#oo#."], pal maps characters to colors
+   * A sprite from color-coded rows: rows like ["..##..", ".#oo#."], pal maps characters to colors
    * ({ "#": "#222034", o: 0xff... }); "." and " " are empty. Top-left at (x, y).
    * opts: { scale, a, flip (mirror left-right), flipY (upside down), tint (draw every pixel in one color) }.
    */
   sprite(rows, pal, x, y, opts = {}) {
     let s = sprites.get(rows);
     if (!s) sprites.set(rows, (s = rows.map((r) => [...r])));
-    const k = opts.scale ?? 1, a = opts.a ?? 1, W = s[0]?.length ?? 0, cache = {};
-    for (let r = 0; r < s.length; r++)
-      for (let q = 0; q < s[r].length; q++) {
-        const ch = s[r][q];
-        if (ch === "." || ch === " ") continue;
-        let c = opts.tint;
-        if (c === undefined) {
-          c = cache[ch];
-          if (c === undefined) c = cache[ch] = pal[ch] === undefined ? 0 : hex(pal[ch]);
-        }
-        if (!c) continue;
-        const col = opts.flip ? W - 1 - q : q, row = opts.flipY ? s.length - 1 - r : r;
-        if (k === 1) this.dot(x + col, y + row, c, a);
-        else this.rect(x + col * k, y + row * k, k, k, c, a);
+    const k = opts.scale ?? 1, a = opts.a ?? 1, W = s[0]?.length ?? 0, H = s.length, cache = {};
+    const color = (col, row) => {
+      if (opts.flip) col = W - 1 - col;
+      if (opts.flipY) row = H - 1 - row;
+      const ch = s[row]?.[col];
+      if (!ch || ch === "." || ch === " ") return 0;
+      if (opts.tint !== undefined) return opts.tint;
+      if (cache[ch] === undefined) cache[ch] = pal[ch] === undefined ? 0 : hex(pal[ch]);
+      return cache[ch];
+    };
+    this.shade(x, y, x + W * k, y + H * k, (lx, ly, o) => {
+      const gx = (lx - x) / k - 0.5, gy = (ly - y) / k - 0.5, x0 = Math.floor(gx), y0 = Math.floor(gy), tx = gx - x0, ty = gy - y0;
+      const weights = [(1 - tx) * (1 - ty), tx * (1 - ty), (1 - tx) * ty, tx * ty], cells = [[x0, y0], [x0 + 1, y0], [x0, y0 + 1], [x0 + 1, y0 + 1]];
+      let alpha = 0, red = 0, green = 0, blue = 0;
+      for (let i = 0; i < 4; i++) {
+        const c = color(cells[i][0], cells[i][1]), weight = weights[i];
+        if (!c || !weight) continue;
+        alpha += weight;
+        red += (c & 255) * weight; green += ((c >>> 8) & 255) * weight; blue += ((c >>> 16) & 255) * weight;
       }
+      if (alpha <= 0) return;
+      o.c = ((Math.round(blue / alpha) << 16) | (Math.round(green / alpha) << 8) | Math.round(red / alpha)) >>> 0;
+      o.a = alpha * a;
+    });
   }
   /**
-   * Pixel text. opts: { font: "mini" (3x5) | "big" (5x7), scale, align: "left" | "center" | "right",
+   * Compact text. opts: { font: "mini" (3x5) | "big" (5x7), scale, align: "left" | "center" | "right",
    * outline: color, shadow: color, a }. (x, y) is the top of the text, at the left, center or right.
    */
   text(str, x, y, c, opts = {}) {

@@ -1,8 +1,8 @@
-// Banded volumes with a lit crest (light on the top edge, tones stepping down into the body, Bayer at the steps)
+// Layered volumes with a lit crest (light on the top edge, tones stepping down into the body)
 // after Sprite Fusion's open-source fog (https://www.spritefusion.com/pixel-art-vfx/fog), MIT License,
 // Copyright (c) 2026 Hugo Duprez.
 import { fit, clamp, rand, wrap, mix, TAU, WHITE } from "../../core/index.js";
-import { clip, box, bayer } from "./_lib.js";
+import { clip, box } from "./_lib.js";
 
 export const meta = {
   name: "Clouds",
@@ -86,8 +86,8 @@ function cloud(q, t, S, C, L, j, i) {
     if (bot <= top) continue;
     const h = bot - top, inner = top2 - top > 2.5 && top2 < bot - 2 ? Math.floor(top2) : -999;
     for (let y = Math.floor(top); y < bot; y++) {
-      const d = y + 0.5 - top, v = d / h, th = bayer(x, y) * 0.12, md = Math.hypot(cx - MX, y - MY);
-      let c = d < 1 ? L.tone[3] : v < 0.25 + th ? L.tone[2] : v < 0.62 + th ? L.tone[1] : L.tone[0];
+      const d = y + 0.5 - top, v = d / h, md = Math.hypot(cx - MX, y - MY);
+      let c = d < 1 ? L.tone[3] : v < 0.25 ? L.tone[2] : v < 0.62 ? L.tone[1] : L.tone[0];
       // the top of a lower puff shows inside the body as a lit line: the cloud's lobes
       if (y === inner) c = Math.max(c, L.tone[2]);
       if (bot - y - 0.5 < 1 && v > 0.5) c = Math.max(0, L.tone[0] - 1);

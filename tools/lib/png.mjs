@@ -26,7 +26,7 @@ export function encodePNG(w, h, rgba) {
   const src = Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength);
   for (let y = 0; y < h; y++) {
     const o = y * (stride + 1);
-    raw[o] = 1; // Sub filter: pixel art has long runs, so differences compress well
+    raw[o] = 1; // Sub filter: neighboring colors stay correlated in the rendered image
     for (let x = 0; x < stride; x++) raw[o + 1 + x] = (src[y * stride + x] - (x >= 4 ? src[y * stride + x - 4] : 0)) & 255;
   }
   const ihdr = Buffer.alloc(13);

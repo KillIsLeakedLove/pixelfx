@@ -6,11 +6,13 @@ import { stockActor } from "./actor.js";
 import { fit, toHex } from "./color.js";
 
 /**
- * A frame: w x h pixels whose top-left sits at (ox, oy) in world space. `color` holds opaque pixels,
- * `light` additive glow; composite() puts them together. Same shape as Sprite Fusion's VFX frames.
+ * A frame: w x h samples whose top-left sits at (ox, oy) in world space. `scale` is an optional integer
+ * backing resolution multiplier; painter coordinates remain in the same logical space. `color` holds RGBA
+ * coverage, `light` additive glow; composite() puts them together.
  */
-export function createFrame(w, h, ox = 0, oy = 0) {
-  return { w, h, ox, oy, color: new Uint32Array(w * h), light: new Uint32Array(w * h) };
+export function createFrame(w, h, ox = 0, oy = 0, scale = 1) {
+  if (!Number.isInteger(scale) || scale < 1) throw new RangeError("frame scale must be a positive integer");
+  return { w, h, ox, oy, ...(scale === 1 ? {} : { scale }), color: new Uint32Array(w * h), light: new Uint32Array(w * h) };
 }
 export function clearFrame(f) {
   f.color.fill(0);
@@ -126,6 +128,30 @@ export function composite(f, out, bg = null, lightK = 1) {
     }
     const j = i * 4;
     out[j] = r; out[j + 1] = g; out[j + 2] = b; out[j + 3] = a;
+  }
+  return out;
+}
+
+/** Bilinear RGBA upscale in premultiplied-alpha space, avoiding colored fringes around transparent edges. */
+export function upscaleRGBA(rgba, w, h, scale, out = new Uint8ClampedArray(w * scale * h * scale * 4)) {
+  if (scale === 1) return rgba;
+  const W = w * scale, H = h * scale;
+  for (let y = 0; y < H; y++) {
+    const fy = Math.max(0, Math.min(h - 1, (y + 0.5) / scale - 0.5)), y0 = Math.floor(fy), y1 = Math.min(h - 1, y0 + 1), ty = fy - y0;
+    for (let x = 0; x < W; x++) {
+      const fx = Math.max(0, Math.min(w - 1, (x + 0.5) / scale - 0.5)), x0 = Math.floor(fx), x1 = Math.min(w - 1, x0 + 1), tx = fx - x0;
+      const i00 = (y0 * w + x0) * 4, i10 = (y0 * w + x1) * 4, i01 = (y1 * w + x0) * 4, i11 = (y1 * w + x1) * 4;
+      const a00 = rgba[i00 + 3] / 255, a10 = rgba[i10 + 3] / 255, a01 = rgba[i01 + 3] / 255, a11 = rgba[i11 + 3] / 255;
+      const topA = a00 + (a10 - a00) * tx, bottomA = a01 + (a11 - a01) * tx, a = topA + (bottomA - topA) * ty;
+      const d = (y * W + x) * 4;
+      if (a > 0) for (let c = 0; c < 3; c++) {
+        const top = rgba[i00 + c] * a00 + (rgba[i10 + c] * a10 - rgba[i00 + c] * a00) * tx;
+        const bottom = rgba[i01 + c] * a01 + (rgba[i11 + c] * a11 - rgba[i01 + c] * a01) * tx;
+        out[d + c] = (top + (bottom - top) * ty) / a;
+      }
+      else out[d] = out[d + 1] = out[d + 2] = 0;
+      out[d + 3] = a * 255;
+    }
   }
   return out;
 }

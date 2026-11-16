@@ -55,7 +55,7 @@ function petals(q, t, S, C, near) {
     const len = (near ? 3.6 : 2.6) + R(6) * 1.1;
     if (rest > 0) {
       const [x, y] = at(tf);
-      // a landed petal settles and shrinks away (no dither, so the ground stays clean)
+      // a landed petal settles and shrinks away with a clean alpha fade
       const fade = 1 - rest / (dur - tf);
       return void (fade > 0.15 && petal(q, x, y, len * (0.35 + 0.65 * fade), (R(7) - 0.5) * 1.2, 0.5, C, 1));
     }

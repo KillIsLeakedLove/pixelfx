@@ -1,10 +1,10 @@
 // The cracks that open in stages and the burst into tumbling pieces follow Sprite Fusion's open-source ice
 // shatter (https://www.spritefusion.com/pixel-art-vfx/ice), MIT License, Copyright (c) 2026 Hugo Duprez.
-import { Particles, Bits, Lights, P, B, Rng, fit, sparkle, clamp, smooth, ease, rand, TAU, WHITE, hex, mix } from "../../core/index.js";
+import { Particles, Bits, Lights, P, B, Rng, fit, sparkle, clamp, smooth, ease, rand, TAU, WHITE, mix } from "../../core/index.js";
 
 export const meta = {
   name: "Egg hatch",
-  desc: "A speckled egg rocks three times, each rock cracking it further with warm light leaking out, then pops: light pours out of the opening and lit shell halves tumble away.",
+  desc: "A softly lit egg rocks three times, each rock cracking it further as warm light leaks through, then pops and sends its shell halves tumbling away.",
   tags: ["spawn", "egg", "hatch", "birth", "crack", "shell", "light", "ground", "one-shot"],
   size: [120, 96],
   origin: [60, 84],
@@ -15,7 +15,6 @@ export const meta = {
   options: {
     palette: ["#1e1826", "#4a3e52", "#857684", "#c4b4ac", "#ece0d2", "#fffaf0"],
     glow: ["#ff8a2a", "#ffd25a", "#fff3c0"],
-    speckle: "#9a6a52",
     seed: 31,
   },
 };
@@ -32,7 +31,7 @@ for (let y = 0; y < EH; y++)
   }
 
 export function create(o) {
-  const C = fit(o.palette, 6), G = fit(o.glow, 3), SPK = hex(o.speckle), R = new Rng(o.seed), floor = () => 0;
+  const C = fit(o.palette, 6), G = fit(o.glow, 3), R = new Rng(o.seed), floor = () => 0;
   const at = new Map();
   for (const e of EGG) at.set(`${e.x},${e.y}`, e);
   const has = (x, y) => at.has(`${x},${y}`);
@@ -42,7 +41,6 @@ export function create(o) {
     const d = nx * LIGHT[0] + ny * LIGHT[1] + nz * LIGHT[2], edge = !has(e.x - 1, e.y) || !has(e.x + 1, e.y) || !has(e.x, e.y - 1) || !has(e.x, e.y + 1);
     let c = d > 0.9 ? WHITE : d > 0.62 ? C[5] : d > 0.32 ? C[4] : d > 0.02 ? C[3] : d > -0.3 ? C[2] : C[1];
     if (edge && nx > 0.25 && ny < 0.55) c = C[3]; // rim light on the shadow side
-    else if (rand(e.x, e.y, 3) < 0.08 && e.v > 0.12 && !edge) c = d > 0.2 ? SPK : mix(SPK, C[1], 0.5);
     e.c = c;
     e.lit = d;
   }
@@ -253,7 +251,7 @@ export function create(o) {
           }
           // light shows through the shell in a halo round the cracks, and the whole egg warms a little
           const dn = st > 0 ? near[st - 1].get(`${ux},${uy}`) : 9, k = Math.min(1, g * 1.5);
-          const base = st > 0 && e.c !== SPK ? mix(e.c, G[0], 0.05 * st * k) : e.c;
+          const base = st > 0 ? mix(e.c, G[0], 0.05 * st * k) : e.c;
           out.c = dn < 1.6 ? mix(base, G[1], (st >= 2 ? 0.32 : 0.2) * k) : dn < 2.7 && st >= 2 ? mix(base, G[1], 0.14 * k) : base;
         });
       // the pop: the opening floods white, and light rays fan up out of it

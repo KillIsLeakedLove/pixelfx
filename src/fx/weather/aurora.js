@@ -2,7 +2,7 @@
 // pulses travelling along, light laid over the top) is adapted from Sprite Fusion's open-source holy light
 // (https://www.spritefusion.com/pixel-art-vfx/holy-light), MIT License, Copyright (c) 2026 Hugo Duprez.
 import { fit, clamp, smooth, rand, mix, TAU, WHITE, sparkle } from "../../core/index.js";
-import { clip, rows, box, field, sample, bayer } from "./_lib.js";
+import { clip, rows, box, field, sample } from "./_lib.js";
 
 export const meta = {
   name: "Aurora",

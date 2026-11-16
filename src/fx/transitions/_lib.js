@@ -57,7 +57,7 @@ const col0 = (p) => (p.fx > 0 ? Math.floor(p.tx + 0.5) : Math.floor(p.tx - 0.5))
  * transitions fill a lot of screen); through p.rect itself when the painter is rotated.
  */
 export function rect(p, x, y, w, h, c) {
-  if (!unrotated(p)) return p.rect(x, y, w, h, c);
+  if (!unrotated(p) || p.scale > 1) return p.rect(x, y, w, h, c);
   const X0 = Math.round(x), X1 = Math.round(x + w), Y0 = Math.round(y), Y1 = Math.round(y + h), fx = p.fx, b = col0(p);
   for (let yy = Y0; yy < Y1; yy++) {
     const sy = Math.floor(p.ty + yy + 0.5);
@@ -67,9 +67,10 @@ export function rect(p, x, y, w, h, c) {
 
 /**
  * Fill a convex polygon [[x, y], ...] row by row, clipped to the screen. c is a color or fn(x, y) -> color
- * (0 skips the pixel); a is the alpha (dithered).
+ * (0 skips the sample); a is continuously composited alpha.
  */
 export function fillConvex(p, pts, c, a = 1) {
+  if (p.scale > 1) return p.poly(pts, c, a);
   let y0 = Infinity, y1 = -Infinity;
   for (const [, y] of pts) (y0 = Math.min(y0, y)), (y1 = Math.max(y1, y));
   const r0 = Math.max(0, Math.ceil(y0 - 0.5)), r1 = Math.min(H - 1, Math.floor(y1 - 0.5)), n = pts.length, fc = typeof c === "function";
@@ -157,7 +158,7 @@ export function field(fn, gmin = 0.45, gmax = 3) {
  */
 export function pixels(p) {
   let sx = 0, sy = 0, i0 = 0;
-  if (p.sn === 0 && p.cs === 1) {
+  if (p.sn === 0 && p.cs === 1 && p.scale === 1) {
     const tx = p.tx, ty = p.ty, fx = p.fx;
     return {
       at(i) {
@@ -182,7 +183,7 @@ export function pixels(p) {
 
 /**
  * A spinning 8-ray glint at (x, y): long rays white at the heart, c1 in the middle and c2 at the tips, short
- * diagonals, the long rays thickened near the heart, and two lights. ang spins it; a fades it (dithered).
+ * diagonals, the long rays thickened near the heart, and two lights. ang spins it; a fades it smoothly.
  */
 export function glint(p, x, y, L, ang, c1, c2, a = 1) {
   if (L < 0.8 || a <= 0) return;

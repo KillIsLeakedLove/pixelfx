@@ -1,4 +1,4 @@
-// The dithered tone ramp and the brighter, bluer approaching side are adapted from Sprite Fusion's open-source
+// The smooth tone ramp and the brighter, bluer approaching side are adapted from Sprite Fusion's open-source
 // black-hole (https://www.spritefusion.com/pixel-art-vfx/black-hole), MIT License, Copyright (c) 2026 Hugo Duprez.
 import { cycle, fit, clamp, smooth, TAU, WHITE, hex, mix } from "../../core/index.js";
 import { VOID, halo, unlight } from "./_lib.js";
@@ -28,7 +28,6 @@ const BANDS = [
   { r0: 47.5, r1: 60, n: 1, hot: 0.42, k: 5.2 },
 ];
 const ROUT = 60;
-const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
 const ICE = hex("#e4f7ff");
 
 // brightness of the disk at a point of its plane (X across, Z away from us), banded, streaked, turning
@@ -67,15 +66,14 @@ function hole(p, C, t, pulse) {
       }
       return;
     }
-    // tone: dithered between ramp steps; the side turning toward us brighter and icier
+    // Blend between ramp steps for a clean volumetric surface; the approaching side turns brighter and icier.
     const I = s.I * 1.3 * (1 + 0.55 * s.dop) * (1 + 0.25 * pulse), f = clamp(I) * (n - 1);
     let i = Math.floor(f);
-    if (f - i > BAYER[((Math.floor(y) & 3) << 2) | (Math.floor(x) & 3)]) i = Math.min(n - 1, i + 1);
     if (i === 0 && I < 0.12) return;
-    let c = RAMP[i];
+    let c = mix(RAMP[i], RAMP[Math.min(n - 1, i + 1)], f - i);
     if (s.dop > 0.35 && i >= n - 3) c = mix(c, ICE, Math.min(1, (s.dop - 0.35) * 2));
     if (s.dop < -0.4 && i >= 2 && i < n - 2) c = mix(c, C[3], 0.35);
-    if (i >= n - 4 && ((Math.floor(x) + Math.floor(y)) & 1) === 0) out.k = 0.3 * Math.min(1, I - 0.35);
+    if (I > 0.45) out.k = 0.3 * Math.min(1, I - 0.35);
     return c;
   });
 }
