@@ -1,7 +1,7 @@
 name: gallery
 on:
   push:
-    branches: [main]
+    branches: [pixel-hd]
   workflow_dispatch:
 permissions:
   contents: read
