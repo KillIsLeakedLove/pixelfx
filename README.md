@@ -2,6 +2,8 @@
   <img src="docs/readme/montage.gif" width="800" alt="A grid of smooth high-definition effects playing at once: a campfire, explosion, waterfall, storm cloud, portal and tornado.">
 </p>
 
+<p align="right"><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="https://patch-gg.github.io/pixelfx/?lang=en">Gallery EN</a> · <a href="https://patch-gg.github.io/pixelfx/?lang=zh">Gallery 中文</a></p>
+
 # pixelfx.
 
 **<!-- count -->244<!-- /count --> smooth HD 2D effects and animations, every one a small piece of code.** Fire,

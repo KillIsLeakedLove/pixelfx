@@ -8,8 +8,8 @@
   --quiet: #999999;
   --line: #333333;
   --patch: #f53cd1;
-  --display: "Funnel Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --text: "Funnel Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display: "Funnel Sans", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --text: "Funnel Sans", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "Red Hat Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   color-scheme: dark;
 }
@@ -51,9 +51,13 @@ button, input, select { font: inherit; color: inherit; }
 .mark { width: 42px; height: 42px; flex: none; margin-top: 4px; }
 h1 { margin: 0; font: 700 48px/56px var(--display); letter-spacing: 0; }
 .sub { margin: 4px 0 0; font: 500 17px/1.4 var(--text); color: var(--quiet); text-wrap: balance; }
-.links { display: flex; gap: 20px; font: 500 13px/1 var(--mono); letter-spacing: 0.04em; }
+.links { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; font: 500 13px/1 var(--mono); letter-spacing: 0.04em; }
 .links a { text-decoration: none; color: var(--quiet); padding: 6px 0; border-bottom: 1px solid var(--line); }
 .links a:hover { color: var(--ink); border-color: var(--ink); }
+.language-switch { display: inline-flex; align-items: center; gap: 2px; }
+.language-switch button { min-inline-size: 32px; min-block-size: 28px; padding: 5px 7px; border: 1px solid var(--line); background: none; color: var(--quiet); font: 500 12px/1 var(--mono); letter-spacing: 0; cursor: pointer; }
+.language-switch button:hover { border-color: var(--quiet); color: var(--ink); }
+.language-switch button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--ground); }
 
 /* bar */
 .bar {
@@ -186,9 +190,14 @@ pre {
 }
 @media (max-width: 520px) {
   .bar-in { flex-wrap: wrap; }
+  .head { align-items: flex-start; }
+  .links { gap: 12px; }
   /* 20 categories won't fit a phone's bar: they scroll in one row there */
   .chips { flex-wrap: nowrap; flex: 1 1 100%; overflow-x: auto; scrollbar-width: none; }
   #q { width: 100%; max-width: none; }
+}
+@media (pointer: coarse) {
+  .language-switch button { min-inline-size: 40px; min-block-size: 40px; }
 }
 @media (max-width: 330px) {
   .tile.big { grid-column: auto; grid-row: auto; }

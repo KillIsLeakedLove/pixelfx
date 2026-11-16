@@ -3,6 +3,7 @@
 
 import { effects, categories } from "../src/fx/index.js";
 import { createFrame, clearFrame, createFx, createAct, actBounds, composite, backdrop, drawActor, painterFor, stockActor, actorAlphaOf, PAL, BACKDROPS } from "../src/core/index.js";
+import { ui, localizeCategory, localizeEffect, localizeTags, resolveLanguage, urlWithLanguage } from "./i18n.js";
 
 const REPO = "https://github.com/patch-gg/pixelfx";
 const FX = Object.entries(effects).map(([id, mod]) => {
@@ -10,6 +11,10 @@ const FX = Object.entries(effects).map(([id, mod]) => {
   return { id, cat: id.split("/")[0], name: meta.name, mod: { ...mod, meta }, meta };
 });
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let storedLanguage = "";
+try { storedLanguage = localStorage.getItem("pixelfx.language") || ""; } catch {}
+let language = resolveLanguage(location.search, storedLanguage, navigator.language);
+const msg = () => ui[language];
 // full-screen effects (transitions, weather, impact frames) fill a 16:9 stage edge to edge instead of floating in it
 const isScreen = (fx) => fx.meta.size[0] >= 320 && Math.abs(fx.meta.size[0] / fx.meta.size[1] - 16 / 9) < 0.05;
 const $ = (s) => document.querySelector(s);
@@ -113,16 +118,19 @@ function build() {
     const list = FX.filter((f) => f.cat === c.id);
     if (!list.length) continue;
     const grid = el("div", { className: "grid" });
-    const sec = el("section", { id: c.id }, [el("div", { className: "section-head" }, [el("h2", { textContent: c.name + "." }), el("p", { textContent: c.blurb })]), grid]);
-    sections.push({ c, sec, list });
+    const title = el("h2", {}), blurb = el("p", {});
+    const sec = el("section", { id: c.id }, [el("div", { className: "section-head" }, [title, blurb]), grid]);
+    sections.push({ c, sec, list, title, blurb });
     for (const fx of list) {
-      const cv = el("canvas", { ariaLabel: fx.name });
+      const copy = localizeEffect(fx, language);
+      const cv = el("canvas", { ariaLabel: copy.name, lang: language === "zh" ? "zh-CN" : "en" });
       const b = fx.mod.act ? actBounds(fx.mod) : null, [fw, fh] = b ? [b.x1 - b.x0, b.y1 - b.y0] : fx.meta.size;
+      const name = el("b", { textContent: copy.name });
       const fig = el("figure", { className: isScreen(fx) ? "tile big screen" : fw > 200 || fh > 170 || (b && (fw > 130 || fx.mod.act.target || fx.mod.act.targets)) ? "tile big" : "tile", tabIndex: 0 }, [
         el("div", { className: "stage" }, cv),
-        el("figcaption", {}, [el("b", { textContent: fx.name }), el("small", { textContent: fx.meta.loop ? "loop" : `${+fx.meta.duration.toFixed(2)}s` })]),
+        el("figcaption", {}, [name, el("small", { textContent: fx.meta.loop ? msg().loop : `${+fx.meta.duration.toFixed(2)}${language === "zh" ? "秒" : "s"}` })]),
       ]);
-      const t = { fx, fig, cv, player: null, visible: false, hover: false };
+      const t = { fx, fig, cv, name, player: null, visible: false, hover: false };
       fig.addEventListener("click", () => openDetail(fx));
       fig.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), openDetail(fx)));
       fig.addEventListener("pointerenter", () => (t.hover = true));
@@ -149,19 +157,25 @@ function build() {
 const state = { cat: "all", q: "" };
 function chips() {
   const box = $("#chips");
+  box.replaceChildren();
   const mk = (id, label, n) => {
     const b = el("button", { className: "chip", type: "button" }, [label, el("span", { textContent: n })]);
     b.dataset.cat = id;
+    b.setAttribute("aria-pressed", String(id === state.cat));
     b.addEventListener("click", () => setCat(id));
     box.append(b);
   };
-  mk("all", "all", FX.length);
-  for (const s of sections) mk(s.c.id, s.c.name, s.list.length);
+  mk("all", msg().all, FX.length);
+  for (const s of sections) mk(s.c.id, localizeCategory(s.c, language).name, s.list.length);
 }
 function setCat(id, fromHash = false) {
   state.cat = sections.some((s) => s.c.id === id) ? id : "all";
   document.querySelectorAll(".chip").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.cat === state.cat)));
-  if (!fromHash) history.replaceState(null, "", state.cat === "all" ? location.pathname : "#" + state.cat);
+  if (!fromHash) {
+    const url = new URL(location.href);
+    url.hash = state.cat === "all" ? "" : state.cat;
+    history.replaceState(null, "", url);
+  }
   filter();
   if (!fromHash) window.scrollTo({ top: 0 });
 }
@@ -172,7 +186,7 @@ function filter() {
     let any = false;
     for (const fx of s.list) {
       const t = tiles.find((x) => x.fx === fx);
-      const hit = (state.cat === "all" || state.cat === s.c.id) && (!q || [fx.id, fx.name, fx.meta.desc, ...fx.meta.tags].join(" ").toLowerCase().includes(q));
+      const hit = (state.cat === "all" || state.cat === s.c.id) && (!q || [fx.id, localizeEffect(fx, language).search].join(" ").toLowerCase().includes(q));
       t.fig.hidden = !hit;
       any ||= hit;
       shown += hit;
@@ -189,38 +203,55 @@ function openDetail(fx) {
   const big = $("#big"), screen = isScreen(fx);
   big.parentElement.classList.toggle("screen", screen);
   detail = screen ? new Player(big, fx, 16 / 9, 1) : new Player(big, fx, 16 / 10, 1.6);
-  const m = fx.meta;
-  $("#d-name").textContent = m.name;
-  $("#d-id").textContent = fx.id;
-  $("#d-desc").textContent = m.desc;
-  const frames = Math.round(m.duration * m.fps) + (m.loop ? 0 : 1);
-  $("#d-facts").replaceChildren(
-    ...[["kind", m.loop ? "loop" : "one-shot"], ["length", `${+m.duration.toFixed(2)} s, ${frames} frames at ${m.fps} fps`], ...(fx.mod.act ? [["acted", actFacts(fx.mod)]] : []), ["canvas", `${m.size[0]} × ${m.size[1]} px`], ["tags", m.tags.join(", ")]].flatMap(([k, v]) => [el("dt", { textContent: k }), el("dd", { textContent: v })]),
-  );
-  // controls
-  $("#d-bg").replaceChildren(...BACKDROPS.concat("none").map((b) => btn(b, () => detail.setBg(b), b === m.bg, "bg")));
-  $("#d-speed").replaceChildren(...[0.25, 0.5, 1].map((s) => btn(`${s}×`, () => (detail.speed = s), s === 1, "speed")));
-  const pal = $("#d-pal");
-  pal.replaceChildren(el("option", { value: "", textContent: "its own" }), ...Object.keys(PAL).map((k) => el("option", { value: k, textContent: k })));
-  pal.value = "";
-  $("#d-actor").hidden = !m.actor;
-  $("#d-actor").setAttribute("aria-pressed", "true");
-  $("#d-flip").setAttribute("aria-pressed", "false");
-  $("#d-play").setAttribute("aria-pressed", "true");
-  $("#d-play").textContent = "pause";
+  detail.fx = fx;
+  detail.opts = {};
+  detail.flip = false;
+  detail.actor = true;
+  detail.speed = 1;
+  detail.playing = true;
+  detail.setBg(fx.meta.bg);
+  sheetInfo = null;
+  renderDetailCopy();
   $("#d-sheet").replaceChildren();
   code(fx);
   d.showModal();
   d.scrollTop = 0;
 }
+let sheetInfo = null;
+function renderDetailCopy() {
+  if (!detail) return;
+  const { fx } = detail, m = fx.meta, locale = msg(), copy = localizeEffect(fx, language);
+  $("#d-name").textContent = copy.name;
+  $("#d-name").lang = language === "zh" ? "zh-CN" : "en";
+  $("#d-desc").textContent = copy.desc;
+  $("#d-desc").lang = language === "zh" ? "zh-CN" : "en";
+  $("#d-facts").replaceChildren(
+    ...[["kind", m.loop ? locale.loop : locale.oneShot], ["length", locale.durationInfo({ duration: +m.duration.toFixed(2), frames: Math.round(m.duration * m.fps) + (m.loop ? 0 : 1), fps: m.fps })], ...(fx.mod.act ? [["acted", actFacts(fx.mod)]] : []), ["canvas", `${m.size[0]} × ${m.size[1]} px`], ["tags", copy.tags.join(", ")]].flatMap(([key, value]) => [el("dt", { textContent: locale[key] }), el("dd", { textContent: value })]),
+  );
+  $("#d-bg").replaceChildren(...BACKDROPS.concat("none").map((b) => btn(locale.backdrops[b], () => detail.setBg(b), b === detail.bg, "bg")));
+  $("#d-speed").replaceChildren(...[0.25, 0.5, 1].map((s) => btn(`${s}×`, () => (detail.speed = s), s === detail.speed, "speed")));
+  const pal = $("#d-pal"), selected = pal.value;
+  pal.replaceChildren(el("option", { value: "", textContent: locale.ownPalette }), ...Object.keys(PAL).map((key) => el("option", { value: key, textContent: localizeTags([key], language)[0] })));
+  pal.value = selected;
+  $("#d-actor").hidden = !m.actor;
+  $("#d-actor").setAttribute("aria-pressed", String(detail.actor));
+  $("#d-flip").setAttribute("aria-pressed", String(detail.flip));
+  $("#d-play").setAttribute("aria-pressed", String(detail.playing));
+  $("#d-play").textContent = detail.playing ? locale.pause : locale.play;
+  if (sheetInfo) {
+    sheetInfo.name = copy.name;
+    renderSheetInfo();
+  }
+}
 // what the body does around the effect, in a line: the wind-up, the freeze, the recovery
 function actFacts(mod) {
+  const locale = msg();
   const k = mod.act.poses, lead = Math.max(0, -k[0][0]), end = k[k.length - 1][0] - mod.meta.duration, hits = (mod.act.hits ?? []).filter((h) => h.stop);
   const parts = [];
-  if (lead > 0) parts.push(`${lead.toFixed(2)} s wind-up`);
-  if (hits.length) parts.push(`${hits.length === 1 ? `${Math.round(hits[0].stop * 1000)} ms freeze` : `${hits.length} freezes`} at ${hits[0].t.toFixed(2)} s`);
-  if (!mod.meta.loop && end > 0.02) parts.push(`${end.toFixed(2)} s recovery`);
-  return parts.join(", ") || "the body moves with it";
+  if (lead > 0) parts.push(language === "zh" ? `${lead.toFixed(2)} 秒蓄力` : `${lead.toFixed(2)} s ${locale.windup}`);
+  if (hits.length) parts.push(language === "zh" ? `${hits.length === 1 ? `${Math.round(hits[0].stop * 1000)} 毫秒定格` : `${hits.length} 次定格`}（${hits[0].t.toFixed(2)} 秒）` : `${hits.length === 1 ? `${Math.round(hits[0].stop * 1000)} ms ${locale.freeze}` : `${hits.length} ${locale.freezes}`} at ${hits[0].t.toFixed(2)} s`);
+  if (!mod.meta.loop && end > 0.02) parts.push(language === "zh" ? `${end.toFixed(2)} 秒收招` : `${end.toFixed(2)} s ${locale.recovery}`);
+  return parts.join(language === "zh" ? "，" : ", ") || locale.bodyMoves;
 }
 function btn(label, fn, on, group) {
   const b = el("button", { className: "btn", type: "button", textContent: label });
@@ -255,6 +286,12 @@ function code(fx) {
   ].join("\n");
   $("#d-src").href = `${REPO}/blob/main/src/fx/${fx.id}.js`;
 }
+function renderSheetInfo() {
+  const image = $("#d-sheet img");
+  if (image && sheetInfo) image.alt = msg().sheetAlt(sheetInfo.name, sheetInfo.scale);
+  const text = $("#d-sheet p");
+  if (text && sheetInfo) text.textContent = msg().sheetInfo(sheetInfo);
+}
 function sheet() {
   const fx = detail.fx, m = fx.meta, [w, h] = m.size, n = Math.max(1, Math.round(m.duration * m.fps) + (m.loop ? 0 : 1));
   const k = 4;
@@ -268,18 +305,22 @@ function sheet() {
     composite(frame, img.data, null);
     ctx.putImageData(img, (i % cols) * w * k, Math.floor(i / cols) * h * k);
   }
-  const pic = el("img", { src: cv.toDataURL("image/png"), alt: `${m.name} sprite sheet at ${k}x resolution`, width: cols * w * k, height: rows * h * k });
-  $("#d-sheet").replaceChildren(pic, el("p", { textContent: `${n} frames at ${w} × ${h} logical px, exported at ${k}x HD resolution, ${cols} across, ${m.fps} fps, ${m.loop ? "loops" : "plays once"}. Save the image, or run: node tools/render.mjs ${fx.id} --sheet` }));
+  const copy = localizeEffect(fx, language);
+  sheetInfo = { name: copy.name, count: n, w, h, scale: k, cols, fps: m.fps, loop: m.loop, id: fx.id };
+  const pic = el("img", { src: cv.toDataURL("image/png"), alt: msg().sheetAlt(copy.name, k), width: cols * w * k, height: rows * h * k });
+  $("#d-sheet").replaceChildren(pic, el("p", { textContent: msg().sheetInfo(sheetInfo) }));
 }
 function wireDetail() {
   const d = $("#detail");
+  $("#lang-en").addEventListener("click", () => setLanguage("en", true));
+  $("#lang-zh").addEventListener("click", () => setLanguage("zh", true));
   $("#d-close").addEventListener("click", () => d.close());
   d.addEventListener("close", () => (detail = null));
   d.addEventListener("click", (e) => e.target === d && d.close());
   $("#d-play").addEventListener("click", (e) => {
     detail.playing = !detail.playing;
     e.target.setAttribute("aria-pressed", String(detail.playing));
-    e.target.textContent = detail.playing ? "pause" : "play";
+    e.target.textContent = detail.playing ? msg().pause : msg().play;
   });
   $("#d-again").addEventListener("click", () => detail.restart());
   $("#d-flip").addEventListener("click", (e) => {
@@ -310,13 +351,58 @@ function wireDetail() {
     const text = $("#d-code").textContent;
     try {
       await navigator.clipboard.writeText(text);
-      e.target.textContent = "copied";
+      e.target.textContent = msg().copied;
     } catch {
       getSelection().selectAllChildren($("#d-code"));
-      e.target.textContent = "selected";
+      e.target.textContent = msg().selected;
     }
-    setTimeout(() => (e.target.textContent = "copy"), 1400);
+    setTimeout(() => (e.target.textContent = msg().copy), 1400);
   });
+}
+
+function applyLanguage() {
+  const locale = msg(), pageLang = language === "zh" ? "zh-CN" : "en";
+  document.documentElement.lang = pageLang;
+  document.title = locale.title;
+  $('meta[name="description"]').content = locale.description;
+  $("#tagline").textContent = locale.tagline;
+  $(".links").setAttribute("aria-label", language === "zh" ? "站点链接" : "Site links");
+  $(".language-switch").setAttribute("aria-label", locale.language);
+  $("#lang-en").setAttribute("aria-pressed", String(language === "en"));
+  $("#lang-zh").setAttribute("aria-pressed", String(language === "zh"));
+  $("#chips").setAttribute("aria-label", locale.categories);
+  $("#q").placeholder = locale.search;
+  $("#q").setAttribute("aria-label", locale.search);
+  $("#none").textContent = locale.noResults;
+  $("#link-github").textContent = locale.github;
+  $("#link-skill").textContent = locale.skill;
+  $("#d-pal").setAttribute("aria-label", locale.palette);
+  document.querySelectorAll("[data-i18n]").forEach((node) => { node.textContent = locale[node.dataset.i18n]; });
+  for (const section of sections) {
+    const copy = localizeCategory(section.c, language);
+    section.title.textContent = language === "zh" ? copy.name : `${copy.name}.`;
+    section.blurb.textContent = copy.blurb;
+  }
+  chips();
+  setCat(state.cat, true);
+  for (const tile of tiles) {
+    const copy = localizeEffect(tile.fx, language);
+    tile.name.textContent = copy.name;
+    tile.cv.setAttribute("aria-label", copy.name);
+    tile.cv.lang = pageLang;
+    tile.fig.lang = pageLang;
+    const length = tile.fig.querySelector("small");
+    length.textContent = tile.fx.meta.loop ? locale.loop : `${+tile.fx.meta.duration.toFixed(2)}${language === "zh" ? "秒" : "s"}`;
+  }
+  filter();
+  renderDetailCopy();
+}
+
+function setLanguage(next, updateUrl = false) {
+  language = next === "zh" ? "zh" : "en";
+  try { localStorage.setItem("pixelfx.language", language); } catch {}
+  if (updateUrl) history.replaceState(null, "", urlWithLanguage(location.href, language));
+  applyLanguage();
 }
 
 // ---- the clock
@@ -330,7 +416,6 @@ function frameLoop(now) {
 }
 
 build();
-chips();
 wireDetail();
 $("#q").addEventListener("input", (e) => {
   state.q = e.target.value;
@@ -338,4 +423,5 @@ $("#q").addEventListener("input", (e) => {
 });
 setCat(location.hash.slice(1) || "all", true);
 addEventListener("hashchange", () => setCat(location.hash.slice(1) || "all", true));
+applyLanguage();
 requestAnimationFrame(frameLoop);

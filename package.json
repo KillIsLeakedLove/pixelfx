@@ -16,7 +16,8 @@
     "render": "node tools/render.mjs",
     "check": "node tools/check.mjs",
     "gallery": "node tools/serve.mjs",
-    "test": "node tools/test-hd.mjs"
+    "test": "node tools/test-hd.mjs && node tools/test-i18n.mjs",
+    "check:secrets": "node tools/check-secrets.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.25.10"
